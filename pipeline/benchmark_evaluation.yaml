@@ -1,0 +1,80 @@
+schema_version: msocr.docspec.v1
+id: pipeline.benchmark_evaluation
+title: Benchmark Evaluation Pipeline
+purpose: Standardize reproducible CER and WER benchmarking with frozen manuscript-level splits.
+scope:
+  project: msocr
+  languages:
+    - name: sogdian
+      status: active
+    - name: old_turkish
+      status: active
+    - name: greek
+      status: planned
+    - name: latin
+      status: planned
+    - name: syriac
+      status: planned
+    - name: coptic
+      status: planned
+  writing_modes:
+    - printed
+    - handwritten
+inputs:
+  required:
+    - benchmark_id
+    - target_language
+    - writing_mode
+    - split_manifest_id
+    - model_id
+    - model_version
+  optional:
+    - preprocessing_profile
+workflow:
+  - step_id: E1
+    name: validate_split
+    action: Ensure split is predefined, frozen, and grouped by manuscript_id.
+  - step_id: E2
+    name: run_inference
+    action: Produce predictions on the test partition.
+  - step_id: E3
+    name: compute_metrics
+    action: Compute CER and WER with documented normalization policy.
+  - step_id: E4
+    name: apply_gate
+    action: Apply route-specific CER threshold and review trigger.
+metrics:
+  primary:
+    - CER
+  secondary:
+    - WER
+thresholds:
+  printed:
+    cer_max: 0.05
+  handwritten:
+    cer_max: 0.10
+  rule: Either policy failure triggers manual review.
+fallback:
+  benchmark_inconclusive:
+    - rerun_on_same_split_version
+    - compare_with_previous_model_version
+    - set_needs_manual_review_true
+outputs:
+  artifacts:
+    - benchmark_report
+    - metric_tables
+    - pass_fail_decision
+    - review_decision
+integration:
+  implemented_modules:
+    - msocr/models/inference.py
+    - msocr/data/manager.py
+  planned_modules:
+    - benchmark_result_store
+status:
+  maturity: active_blueprint
+  implementation_state: documentation_defined
+owners:
+  - role: evaluation
+    team: msocr
+last_updated: 2026-02-12

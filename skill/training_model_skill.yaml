@@ -1,0 +1,92 @@
+schema_version: msocr.docspec.v1
+id: skill.training_model
+title: Training Model Skill for Higher Accuracy
+purpose: Define training-oriented decision and execution guidance for high-accuracy OCR/HTR.
+scope:
+  project: msocr
+  languages:
+    - name: sogdian
+      status: implemented
+      priority: primary
+    - name: old_turkish
+      status: implemented
+      priority: secondary
+    - name: greek
+      status: planned
+      priority: backlog
+    - name: latin
+      status: planned
+      priority: backlog
+    - name: syriac
+      status: planned
+      priority: backlog
+    - name: coptic
+      status: planned
+      priority: backlog
+  writing_modes:
+    - printed
+    - handwritten
+inputs:
+  required:
+    - target_language
+    - writing_mode
+    - dataset_manifest
+    - split_manifest_id
+    - model_config_id
+  optional:
+    - century
+    - compute_budget
+workflow:
+  - step_id: S1
+    name: validate_inputs
+    action: Reject runs without explicit writing_mode or split manifest.
+  - step_id: S2
+    name: select_route
+    action: Route to printed or handwritten training pipeline before training starts.
+  - step_id: S3
+    name: configure_training
+    action: Apply language and route-specific config profile.
+  - step_id: S4
+    name: run_training
+    action: Use Kraken ketos training wrapper through existing msocr flow.
+  - step_id: S5
+    name: benchmark_gate
+    action: Evaluate on frozen test split with CER and WER reporting.
+metrics:
+  primary:
+    - CER
+  secondary:
+    - WER
+thresholds:
+  printed:
+    cer_max: 0.05
+  handwritten:
+    cer_max: 0.10
+  rule: Trigger manual review if any required metric policy fails.
+fallback:
+  low_confidence_or_underperforming:
+    - rerun_with_adjusted_preprocessing
+    - run_secondary_model_profile
+    - set_needs_manual_review_true
+outputs:
+  artifacts:
+    - model_checkpoint
+    - benchmark_report
+    - route_trace
+    - manual_review_flag
+integration:
+  implemented_modules:
+    - msocr/cli.py
+    - msocr/training/ketos_trainer.py
+    - msocr/models/inference.py
+    - msocr/data/manager.py
+  planned_modules:
+    - script_mode_classifier
+    - language_engine_router
+status:
+  maturity: active_blueprint
+  implementation_state: documentation_defined
+owners:
+  - role: ocr_architecture
+    team: msocr
+last_updated: 2026-02-12

@@ -1,0 +1,85 @@
+schema_version: msocr.docspec.v1
+id: pipeline.base_msocr_compatible
+title: Base msocr Compatible Pipeline
+purpose: Preserve current CLI order while attaching route-aware and benchmark-aware controls.
+scope:
+  project: msocr
+  languages:
+    - name: sogdian
+      status: active
+    - name: old_turkish
+      status: active
+    - name: greek
+      status: planned
+    - name: latin
+      status: planned
+    - name: syriac
+      status: planned
+    - name: coptic
+      status: planned
+  writing_modes:
+    - printed
+    - handwritten
+inputs:
+  required:
+    - target_language
+    - writing_mode
+    - dataset_manifest
+    - split_manifest_id
+  optional:
+    - desired_accuracy
+    - compute_budget
+workflow:
+  - step_id: B1
+    name: preprocess
+    action: Run preprocessing with route-specific profile.
+  - step_id: B2
+    name: annotation
+    action: Prepare and validate aligned training annotations.
+  - step_id: B3
+    name: train
+    action: Train model with ketos wrapper and selected config.
+  - step_id: B4
+    name: ocr
+    action: Run inference on test split.
+  - step_id: B5
+    name: evaluate
+    action: Compute CER and WER, apply manual review gate.
+metrics:
+  primary:
+    - CER
+  secondary:
+    - WER
+thresholds:
+  printed:
+    cer_max: 0.05
+  handwritten:
+    cer_max: 0.10
+  rule: If threshold policy fails, mark run as review-required.
+fallback:
+  low_confidence_or_failed_gate:
+    - execute_low_confidence_fallback_pipeline
+    - emit_needs_manual_review
+outputs:
+  artifacts:
+    - training_artifacts
+    - inference_outputs
+    - benchmark_report
+    - review_decision
+integration:
+  implemented_modules:
+    - msocr/cli.py
+    - msocr/data/annotation.py
+    - msocr/preprocessing/pipeline.py
+    - msocr/training/ketos_trainer.py
+    - msocr/models/inference.py
+  planned_modules:
+    - script_mode_classifier
+    - advanced_router
+status:
+  maturity: active_blueprint
+  implementation_state: documentation_defined
+owners:
+  - role: pipeline_architecture
+    team: msocr
+last_updated: 2026-02-12

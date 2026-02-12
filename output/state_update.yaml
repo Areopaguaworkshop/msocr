@@ -1,0 +1,103 @@
+schema_version: msocr.docspec.v1
+id: output.state_update
+title: Documentation State Update
+purpose: Track completion status for the documentation-first blueprint deliverables.
+scope:
+  project: msocr
+  languages:
+    - name: sogdian
+      status: fully_specified_docs
+    - name: old_turkish
+      status: partially_specified_docs
+    - name: greek
+      status: planned_docs
+    - name: latin
+      status: planned_docs
+    - name: syriac
+      status: planned_docs
+    - name: coptic
+      status: planned_docs
+  writing_modes:
+    - printed
+    - handwritten
+inputs:
+  required:
+    - deliverable_list
+    - completion_status
+  optional:
+    - blockers
+workflow:
+  - step_id: U1
+    name: enumerate_deliverables
+    action: Verify required markdown and YAML outputs exist.
+  - step_id: U2
+    name: verify_schema_consistency
+    action: Confirm all YAML files follow standardized schema keys.
+  - step_id: U3
+    name: publish_state
+    action: Record completion and open risks.
+metrics:
+  primary:
+    - deliverable_completion_ratio
+  secondary:
+    - schema_consistency_ratio
+thresholds:
+  completion:
+    min_deliverable_completion_ratio: 1.0
+    min_schema_consistency_ratio: 1.0
+  rule: Any missing required output keeps state as partial.
+fallback:
+  incomplete_state:
+    - list_missing_items
+    - keep_status_in_progress
+outputs:
+  artifacts:
+    - completion_table
+    - open_risks
+    - next_actions
+integration:
+  implemented_modules:
+    - msocr/cli.py
+    - msocr/data/manager.py
+  planned_modules:
+    - automated_doc_validator
+status:
+  maturity: active
+  implementation_state: documented
+owners:
+  - role: documentation_governance
+    team: msocr
+last_updated: 2026-02-12
+completion_table:
+  - item: instruction/summary.md
+    status: completed
+    note: Fully rewritten baseline.
+  - item: instruction/agent.patristic.ocr.model.md
+    status: completed
+    note: Added architecture and route contracts.
+  - item: instruction/eval.md
+    status: completed
+    note: Added CER/WER benchmark standard and split policy.
+  - item: instruction/code_review.md
+    status: completed
+    note: Added template checklist for training/evaluation review.
+  - item: skill/*.yaml
+    status: completed
+    note: Standardized schema applied.
+  - item: pipeline/*.yaml
+    status: completed
+    note: Printed and handwritten routes separated.
+  - item: source_registry/patristic_sources.yaml
+    status: completed
+    note: Implemented/planned/external sources registered.
+  - item: output/state_update.yaml
+    status: completed
+    note: This state record.
+open_risks:
+  - Planned modules are not yet implemented in code.
+  - Handwritten models for Syriac and Coptic require custom training data.
+  - Threshold targets may require dataset-specific recalibration.
+next_actions:
+  - Validate documentation with project stakeholders.
+  - Link YAML specs to future implementation tickets.
+  - Add split manifest versioning policy artifacts when datasets are prepared.
