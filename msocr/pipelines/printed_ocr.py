@@ -1,6 +1,6 @@
 """Printed OCR routing pipeline.
 
-Greek printed OCR uses Kraken models.
+Greek printed OCR uses Tesseract (grc) as primary with Kraken fallback.
 Latin printed OCR uses Kraken CATMuS-Print Large with Tesseract fallback.
 Syriac printed OCR uses Tesseract (Estrangela baseline), with optional
 CER-gated switch to custom Serto/East Syriac Tesseract models.
@@ -187,29 +187,56 @@ def run_printed_ocr(
         )
 
     if lang_key == "greek":
-        if engine_key == "tesseract":
+        if engine_key == "kraken":
+            if model:
+                model_path = Path(model)
+            else:
+                model_path = GREEK_PRIMARY_MODEL
+            if not model_path.exists():
+                raise ClickException(
+                    f"Greek Kraken model not found: {model_path}. "
+                    "Provide --model or place the default model in models/kraken/."
+                )
+            text = _run_kraken_with_fallback(image_path, model_path, device)
+            if text:
+                return {"text": text, "engine": "kraken", "language": lang_key}
+
+            for fallback_model in GREEK_FALLBACK_MODELS:
+                if not fallback_model.exists():
+                    continue
+                text = _run_kraken_with_fallback(image_path, fallback_model, device)
+                if text:
+                    return {"text": text, "engine": "kraken", "language": lang_key}
+
             raise ClickException(
-                "Greek printed OCR is configured for Kraken. Use --engine kraken."
+                "Greek Kraken OCR returned empty output with primary and fallback models."
             )
-        if engine_key in ("auto", "kraken"):
-            primary_model = _resolve_greek_model(model)
+
+        if engine_key in ("auto", "tesseract"):
+            text = _run_tesseract(image_path, "grc")
+            if text:
+                return {"text": text, "engine": "tesseract", "language": lang_key}
+
+            if engine_key == "tesseract":
+                raise ClickException("Greek Tesseract OCR returned empty output.")
+
+            primary_model = _resolve_greek_model(model) if model else GREEK_PRIMARY_MODEL
             text = _run_kraken_with_fallback(image_path, primary_model, device)
             if text:
                 return {"text": text, "engine": "kraken", "language": lang_key}
 
-            # Fallback is only used when no explicit --model was passed.
-            if not model:
-                for fallback_model in GREEK_FALLBACK_MODELS:
-                    if not fallback_model.exists():
-                        continue
-                    text = _run_kraken_with_fallback(image_path, fallback_model, device)
-                    if text:
-                        return {"text": text, "engine": "kraken", "language": lang_key}
+            for fallback_model in GREEK_FALLBACK_MODELS:
+                if not fallback_model.exists():
+                    continue
+                text = _run_kraken_with_fallback(image_path, fallback_model, device)
+                if text:
+                    return {"text": text, "engine": "kraken", "language": lang_key}
 
             raise ClickException(
-                "Greek OCR returned empty output with primary and fallback models."
+                "Greek OCR returned empty output with Tesseract and Kraken models."
             )
-        raise ClickException("Unsupported engine for Greek. Use auto or kraken.")
+
+        raise ClickException("Unsupported engine for Greek. Use auto, tesseract, or kraken.")
 
     if lang_key == "syriac":
         if engine_key == "kraken":

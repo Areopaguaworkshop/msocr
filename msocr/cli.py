@@ -221,11 +221,21 @@ def ocr(
     for fmt in formats:
         if fmt == "pdf":
             output_path = _resolve_output_path(output, input_path, fmt, "ocr")
-            save_output(output_data, image_paths, fmt, output_path)
+            original_pdf = input_path if input_path.suffix.lower() == ".pdf" else None
+            output_path = save_output(
+                output_data,
+                image_paths,
+                fmt,
+                output_path,
+                original_pdf_path=original_pdf,
+                language=lang,
+            )
             click.echo(f"Searchable PDF saved to {output_path}")
         else:
             output_path = _resolve_output_path(output, input_path, fmt, "ocr")
-            save_output(output_data, image_paths, fmt, output_path)
+            output_path = save_output(
+                output_data, image_paths, fmt, output_path, language=lang
+            )
             if output_path:
                 click.echo(f"{fmt.upper()} result saved to {output_path}")
             else:
@@ -327,7 +337,9 @@ def htr(input_path, lang, model, provider, output_format, output, device):
         if fmt == "pdf":
             continue
         output_path = _resolve_output_path(output, input_path, fmt, "htr")
-        save_output(output_data, image_paths, fmt, output_path)
+        output_path = save_output(
+            output_data, image_paths, fmt, output_path, language=lang_key
+        )
         if output_path:
             click.echo(f"{fmt.upper()} result saved to {output_path}")
         else:

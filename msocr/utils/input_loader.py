@@ -17,10 +17,14 @@ def expand_input_to_images(
 
     - Image input returns a single-item list with the original image path.
     - PDF input renders all pages to PNGs in `temp_dir` and returns page image paths.
+    
+    Note: Images with alpha channels are handled by _run_ocrmypdf in formats.py
     """
     if not input_path.exists():
         raise FileNotFoundError(f"Input not found: {input_path}")
 
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
     if not is_pdf(input_path):
         return [input_path]
 
@@ -31,7 +35,6 @@ def expand_input_to_images(
             "PDF input requires pypdfium2. Install dependency and retry."
         ) from exc
 
-    temp_dir.mkdir(parents=True, exist_ok=True)
     doc = pdfium.PdfDocument(str(input_path))
     if len(doc) == 0:
         raise ValueError(f"PDF has no pages: {input_path}")
