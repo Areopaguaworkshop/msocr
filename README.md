@@ -1,279 +1,184 @@
-# Manuscript OCR for Sogdian and Old Turkish using Kraken
+# msocr
 
-A comprehensive OCR system for ancient manuscript recognition, specifically designed for Sogdian and Old Turkish scripts using Kraken ketos training framework.
+Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract integration, benchmark reporting, FastAPI service APIs, and Gradio demo UI.
 
-## Features
+## Current Status
 
-- **Multi-language Support**: Optimized for Sogdian and Old Turkish manuscripts
-- **Advanced Preprocessing**: Noise reduction, contrast enhancement, skew correction
-- **Standard Data Formats**: Full support for ALTO and PAGE XML standards
-- **Training Workflow**: Complete training pipeline with marimo notebooks
-- **Annotation Integration**: Export to Label Studio and CVAT for ground truth creation
-- **Command-line Interface**: Easy-to-use CLI for OCR operations
-- **Cloud Training Ready**: Support for GPU training on cloud platforms
+### Implemented
+- CLI with subcommands:
+  - `ocr` (printed OCR, image/PDF input)
+  - `htr` (handwritten OCR/HTR, image/PDF input)
+  - `train` (Kraken ketos training)
+  - `preprocess`
+  - `benchmark-printed`
+  - `serve-api`
+  - `demo-gradio`
+- Printed OCR routing:
+  - Greek: Kraken primary + Kraken fallback models
+  - Latin: Kraken CATMuS-Print Large primary + Tesseract fallback
+  - Syriac: Tesseract `syr` baseline with optional Serto/East CER-gated traineddata switch
+  - Coptic: Tesseract (`cop`) route
+  - Armenian: Tesseract (`hye-calfa-n` preferred, fallback `hye`)
+  - Geez: Tesseract fallback chain (`gez` -> `tir` -> `amh`)
+- Handwritten defaults:
+  - Latin: Kraken McCATMuS
+  - Greek: Kraken greek-german serifs model
+  - Syriac: Transkribus workflow bridge message path
+- Printed benchmark runner with CER/WER JSON reports
+- FastAPI backend (`msocr/service/api.py`)
+- Gradio browser demo (`msocr/service/gradio_demo.py`)
+
+### Planned
+- Production handwritten workflows for Syriac/Coptic/Armenian/Geez with local Kraken training from PAGE/ALTO exports.
+- Expanded language-aware classifier/router and post-correction modules.
 
 ## Installation
 
 ```bash
-# Clone repository
 git clone <repository-url>
 cd msocr
-
-# Install dependencies using uv
-uv install
-
-# Optional: Install development dependencies
-uv install --dev
+uv sync
 ```
 
 ## Quick Start
 
-### 1. Dataset Setup
-
+### 1. Printed OCR (image)
 ```bash
-# Create a dataset for Sogdian manuscripts
-mkdir -p data/sogdian_dataset/images
-# Copy your manuscript images to data/sogdian_dataset/images/
-
-# Initialize dataset
-python -c "
-from msocr.data import DatasetManager
-ds = DatasetManager('data/sogdian_dataset')
-ds.add_directory('path/to/your/sogdian_images', 'sogdian')
-"
+uv run msocr ocr --lang latin test/benchmarks/printed/latin/latin_sample_001.png
 ```
 
-### 2. Preprocess Images
-
+### 2. Printed OCR (PDF)
 ```bash
-# Preprocess all images in a directory
-msocr preprocess --input-dir data/sogdian_dataset/images
+uv run msocr ocr --lang latin /path/to/file.pdf
 ```
 
-### 3. Annotation Setup
-
+### 3. Handwritten route
 ```bash
-# Export for Label Studio annotation
-python -c "
-from msocr.data import DatasetManager, AnnotationExporter
-ds = DatasetManager('data/sogdian_dataset')
-exporter = AnnotationExporter(ds)
-exporter.export_for_labelstudio('labelstudio_export', language='sogdian')
-"
+uv run msocr htr --lang latin /path/to/line_or_page.png
 ```
 
-### 4. Training
-
+### 4. Benchmark (printed)
 ```bash
-# Use marimo notebook for training
-marimo edit notebooks/sogdian_training.py
-
-# Or use CLI
-msocr train --config configs/sogdian_config.yaml
+uv run msocr benchmark-printed \
+  --manifest test/benchmarks/manifests/printed_all.json \
+  --output output/benchmarks/printed_all_report.json \
+  --cer-threshold 0.05
 ```
 
-### 5. OCR Inference
-
+### 5. Start API backend
 ```bash
-# Run OCR on a manuscript image
-msocr ocr --image path/to/manuscript.jpg --model models/sogdian_manuscript.mlmodel
+uv run msocr serve-api --host 127.0.0.1 --port 8000
 ```
 
-## Data Formats
-
-### ALTO XML Format
-The system supports ALTO XML version 4.2+ with the following structure:
-
-```xml
-<alto xmlns="http://www.loc.gov/standards/alto/ns-v4#">
-  <Description>
-    <sourceImageInformation>
-      <fileName>manuscript.jpg</fileName>
-    </sourceImageInformation>
-  </Description>
-  <Layout>
-    <Page>
-      <PrintSpace>
-        <TextBlock ID="block_1">
-          <TextLine ID="line_1" HPOS="100" VPOS="200" WIDTH="800" HEIGHT="50"
-                    BASELINE="100 220 900 220">
-            <String CONTENT="transcribed text"/>
-          </TextLine>
-        </TextBlock>
-      </PrintSpace>
-    </Page>
-  </Layout>
-</alto>
-```
-
-### PAGE XML Format
-Also supports PAGE XML 2019-07-15 format:
-
-```xml
-<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15">
-  <Page imageFilename="manuscript.jpg">
-    <TextRegion id="region_1">
-      <Coords points="100,200 900,200 900,250 100,250"/>
-      <TextLine id="line_1">
-        <Baseline points="100,220 900,220"/>
-        <TextEquiv><Unicode>transcribed text</Unicode></TextEquiv>
-      </TextLine>
-    </TextRegion>
-  </Page>
-</PcGts>
-```
-
-## Training Configuration
-
-### Sogdian Configuration
-- **Model Spec**: Optimized for complex script with multiple diacritics
-- **Direction**: Left-to-right
-- **Normalization**: NFC Unicode normalization
-- **Augmentation**: Enabled with rotation, scaling, and elastic distortion
-
-### Old Turkish Configuration
-- **Model Spec**: Optimized for Arabic-derived cursive script
-- **Direction**: Right-to-left
-- **Normalization**: NFC Unicode normalization
-- **Augmentation**: Enhanced for cursive scripts with perspective distortion
-
-## Cloud Training
-
-For GPU training on cloud platforms:
-
+### 6. Start Gradio demo
 ```bash
-# Upload compiled dataset
-gsutil cp dataset.arrow gs://your-bucket/
-
-# Use cloud training script
-bash data/cloud_train.sh
-
-# Download trained models
-gsutil cp gs://your-bucket/*.mlmodel models/
+uv run msocr demo-gradio --host 127.0.0.1 --port 7860
 ```
 
-## Project Structure
+## CLI Reference
 
+### `ocr`
+```bash
+uv run msocr ocr [OPTIONS] INPUT_PATH
 ```
+- `INPUT_PATH`: required positional input (image or PDF)
+- Key options:
+  - `--lang` (required)
+  - `--engine auto|kraken|tesseract`
+  - `--model` (optional override)
+  - `--syriac-variant default|estrangela|serto|east`
+  - `--reference-text` and `--cer-threshold` (Syriac variant gating)
+
+### `htr`
+```bash
+uv run msocr htr [OPTIONS] INPUT_PATH
+```
+- `INPUT_PATH`: required positional input (image or PDF)
+- Key options:
+  - `--lang` (required)
+  - `--provider auto|kraken|transkribus`
+  - `--model` (optional override)
+
+### `train`
+```bash
+uv run msocr train --lang <lang> --mode ocr|htr [--config ...] [--gt-dir ...|--gt-file ...]
+```
+
+## API Endpoints
+
+When running `serve-api`:
+- `GET /health`
+- `POST /ocr`
+- `POST /htr`
+
+OpenAPI docs:
+- `http://127.0.0.1:8000/docs`
+
+## Benchmarks
+
+Benchmark assets and manifests:
+- `test/benchmarks/printed/...`
+- `test/benchmarks/references/...`
+- `test/benchmarks/manifests/...`
+
+Report output examples:
+- `output/benchmarks/printed_<language>_report.json`
+- `output/benchmarks/printed_all_report.json`
+
+Policy:
+- Printed acceptance gate: `CER <= 0.05`
+- `WER` tracked as secondary diagnostic metric
+- Failed cases should be marked for manual review
+
+## Model Paths (Current Conventions)
+
+### Kraken
+- Greek printed primary:
+  - `models/kraken/greek-english_porson_sophoclesplaysa05campgoog/...mlmodel`
+- Greek fallback:
+  - `models/kraken/greek-german_serifs_sophokle1v3soph/...mlmodel`
+  - `models/kraken/greek-german_serifs_bsb10234118/...mlmodel`
+- Latin printed primary:
+  - `models/kraken/latin_printed_catmus_large.mlmodel`
+- Latin handwritten default:
+  - `models/kraken/latin_handwritten_mccatmus.mlmodel`
+
+### Tesseract local traineddata
+- Coptic:
+  - `models/tesseract/cop.traineddata`
+- Armenian:
+  - `models/tesseract/hye-calfa-n.traineddata`
+- Syriac custom variant slots (optional):
+  - `models/tesseract/syr_serto.traineddata`
+  - `models/tesseract/syr_east.traineddata`
+
+## Project Layout (Current)
+
+```text
 msocr/
 ├── msocr/
-│   ├── __init__.py
-│   ├── cli.py                 # Command-line interface
-│   ├── data/                  # Data management
-│   │   ├── __init__.py
-│   │   ├── manager.py         # Dataset manager
-│   │   └── annotation.py      # Annotation export/import
-│   ├── preprocessing/          # Image preprocessing
-│   │   ├── __init__.py
-│   │   └── pipeline.py        # Preprocessing pipeline
-│   ├── training/              # Model training
-│   │   ├── __init__.py
-│   │   └── ketos_trainer.py  # Kraken training wrapper
-│   └── models/               # Model inference
-│       ├── __init__.py
-│       └── inference.py       # OCR inference
-├── configs/
-│   ├── sogdian_config.yaml    # Sogdian training config
-│   └── old_turkish_config.yaml # Old Turkish training config
-├── notebooks/
-│   ├── sogdian_training.py    # Sogdian training notebook
-│   └── old_turkish_training.py # Old Turkish training notebook
-├── data/                     # Data directory
-├── models/                   # Trained models
-├── logs/                     # Training logs
-└── pyproject.toml           # Project configuration
+│   ├── cli.py
+│   ├── data/
+│   ├── evaluation/
+│   ├── models/
+│   ├── pipelines/
+│   ├── preprocessing/
+│   ├── service/
+│   │   ├── api.py
+│   │   └── gradio_demo.py
+│   ├── training/
+│   └── utils/
+├── instruction/
+├── pipeline/
+├── skill/
+├── source_registry/
+├── test/benchmarks/
+├── models/
+├── output/
+└── pyproject.toml
 ```
 
-## Usage Examples
+## Notes
 
-### Data Collection
-
-```python
-from msocr.data import DatasetManager
-
-# Create dataset manager
-ds = DatasetManager("data/my_dataset")
-
-# Add single image
-image_id = ds.add_image("path/to/manuscript.jpg", "sogdian", 
-                        manuscript_id="manuscript_001",
-                        description="Page 1 of manuscript")
-
-# Add directory of images
-added_ids = ds.add_directory("path/to/images/", "sogdian")
-
-# Get dataset statistics
-stats = ds.get_statistics()
-print(f"Total images: {stats['total_images']}")
-```
-
-### Preprocessing
-
-```python
-from msocr.preprocessing import preprocess_directory
-
-# Preprocess all images
-processed_count = preprocess_directory("raw_images/", "processed_images/")
-```
-
-### Training
-
-```python
-import yaml
-from msocr.training import KetosTrainer
-
-# Load configuration
-with open("configs/sogdian_config.yaml") as f:
-    config = yaml.safe_load(f)
-
-# Create trainer
-trainer = KetosTrainer(config)
-
-# Train model
-trainer.train(xml_files)
-```
-
-### OCR Inference
-
-```python
-from msocr.models import OCRModel, predict
-
-# Load model
-model = OCRModel("models/sogdian_manuscript.mlmodel")
-
-# Predict text from image
-result = model.predict_line("path/to/manuscript_line.jpg")
-print(f"Text: {result['full_text']}")
-
-# Or use convenience function
-text = predict("image.jpg", "model.mlmodel")
-```
-
-## Requirements
-
-- Python 3.8+
-- Kraken 5.0.0+
-- OpenCV 4.8.0+
-- PIL 10.0.0+
-- NumPy 1.24.0+
-- scikit-image 0.21.0+
-- PyTorch 2.0.0+
-- marimo 0.1.0+ (for notebooks)
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License.
-
-## Acknowledgments
-
-- Kraken OCR framework for the underlying recognition engine
-- The manuscript community for feedback and testing
-- Digital humanities researchers for requirements and validation
+- `models/` and `output/` are runtime artifact directories and are gitignored.
+- OCRopus/Ocropy fallback is deactivated in the current implementation phase.

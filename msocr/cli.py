@@ -1,5 +1,6 @@
 """CLI interface for msocr."""
 
+import tempfile
 from pathlib import Path
 from typing import Dict, List
 
@@ -70,8 +71,8 @@ def main():
 
 
 @main.command()
+@click.argument("input_path", type=click.Path(path_type=Path))
 @click.option("--lang", required=True, type=LANG_CHOICES, help="Target OCR language")
-@click.option("--image", "-i", required=True, help="Input image path")
 @click.option(
     "--model",
     "-m",
@@ -85,7 +86,7 @@ def main():
     help="Printed OCR engine selection",
 )
 @click.option(
-    "--variant",
+    "--syriac-variant",
     type=click.Choice(["default", "estrangela", "serto", "east"], case_sensitive=False),
     default="default",
     show_default=True,
@@ -106,31 +107,56 @@ def main():
 @click.option("--output", "-o", help="Output text path")
 @click.option("--device", default="cpu", show_default=True, help="Inference device")
 def ocr(
-    lang, image, model, engine, variant, reference_text, cer_threshold, output, device
+    input_path,
+    lang,
+    model,
+    engine,
+    syriac_variant,
+    reference_text,
+    cer_threshold,
+    output,
+    device,
 ):
-    """Run printed OCR."""
+    """Run printed OCR for image or PDF input."""
     from msocr.pipelines.printed_ocr import run_printed_ocr
+    from msocr.utils.input_loader import expand_input_to_images
 
-    image_path = Path(image)
-    if not image_path.exists():
-        raise click.ClickException(f"Input image not found: {image_path}")
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
 
     if model and not Path(model).exists():
         raise click.ClickException(f"Model file not found: {Path(model)}")
 
-    pipeline_result = run_printed_ocr(
-        lang=_normalize_lang(lang),
-        image_path=image_path,
-        model=model,
-        device=device,
-        engine=engine,
-        variant=variant,
-        reference_text_path=str(reference_text) if reference_text else None,
-        cer_threshold=cer_threshold,
+    with tempfile.TemporaryDirectory(prefix="msocr-ocr-") as td:
+        try:
+            image_paths = expand_input_to_images(input_path, Path(td))
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
+
+        page_texts = []
+        selected_engine = "unknown"
+        for idx, image_path in enumerate(image_paths, start=1):
+            pipeline_result = run_printed_ocr(
+                lang=_normalize_lang(lang),
+                image_path=image_path,
+                model=model,
+                device=device,
+                engine=engine,
+                variant=syriac_variant,
+                reference_text_path=str(reference_text) if reference_text else None,
+                cer_threshold=cer_threshold,
+            )
+            selected_engine = pipeline_result["engine"]
+            if len(image_paths) == 1:
+                page_texts.append(pipeline_result["text"])
+            else:
+                page_texts.append(f"[page {idx}]\n{pipeline_result['text']}")
+
+        result = "\n\n".join(page_texts)
+
+    click.echo(
+        f"engine={selected_engine} mode=ocr lang={_normalize_lang(lang)} pages={len(page_texts)}"
     )
-    result = pipeline_result["text"]
-    selected_engine = pipeline_result["engine"]
-    click.echo(f"engine={selected_engine} mode=ocr lang={_normalize_lang(lang)}")
     if output:
         output_path = Path(output)
         output_path.write_text(result, encoding="utf-8")
@@ -140,8 +166,8 @@ def ocr(
 
 
 @main.command()
+@click.argument("input_path", type=click.Path(path_type=Path))
 @click.option("--lang", required=True, type=LANG_CHOICES, help="Target HTR language")
-@click.option("--image", "-i", required=True, help="Input image path")
 @click.option(
     "--model",
     "-m",
@@ -156,43 +182,47 @@ def ocr(
 )
 @click.option("--output", "-o", help="Output text path")
 @click.option("--device", default="cpu", show_default=True, help="Inference device")
-def htr(lang, image, model, provider, output, device):
-    """Run handwritten HTR."""
-    from msocr.models.inference import predict
+def htr(input_path, lang, model, provider, output, device):
+    """Run handwritten HTR for image or PDF input."""
+    from msocr.service.runtime import run_htr_service
+    from msocr.utils.input_loader import expand_input_to_images
 
     lang_key = _normalize_lang(lang)
     provider_key = provider.lower()
-    image_path = Path(image)
-    if not image_path.exists():
-        raise click.ClickException(f"Input image not found: {image_path}")
+    if not input_path.exists():
+        raise click.ClickException(f"Input not found: {input_path}")
 
-    if lang_key == "syriac" and provider_key in ("auto", "transkribus"):
-        click.echo("provider=transkribus mode=htr lang=syriac")
-        click.echo(
-            "Syriac handwritten route is configured for Transkribus workflow currently. "
-            "Export/import through Transkribus and then re-ingest results."
-        )
-        return
+    with tempfile.TemporaryDirectory(prefix="msocr-htr-") as td:
+        try:
+            image_paths = expand_input_to_images(input_path, Path(td))
+        except Exception as exc:
+            raise click.ClickException(str(exc)) from exc
 
-    if model:
-        model_path = Path(model)
-    elif lang_key == "latin":
-        model_path = Path("models/kraken/latin_handwritten_mccatmus.mlmodel")
-    elif lang_key == "greek":
-        model_path = Path(
-            "models/kraken/greek-german_serifs_sophokle1v3soph/"
-            "greek-german_serifs_sophokle1v3soph.mlmodel"
-        )
-    else:
-        raise click.ClickException(
-            "HTR model is required for this language. Pass --model explicitly."
-        )
+        page_texts = []
+        selected_engine = ENGINE_NAME
+        for idx, image_path in enumerate(image_paths, start=1):
+            try:
+                resp = run_htr_service(
+                    lang=lang_key,
+                    image_path=image_path,
+                    model=model,
+                    provider=provider_key,
+                    device=device,
+                )
+            except Exception as exc:
+                raise click.ClickException(str(exc)) from exc
 
-    if not model_path.exists():
-        raise click.ClickException(f"Model file not found: {model_path}")
+            selected_engine = resp["engine"]
+            if len(image_paths) == 1:
+                page_texts.append(resp["text"])
+            else:
+                page_texts.append(f"[page {idx}]\n{resp['text']}")
 
-    result = predict(str(image_path), str(model_path), device=device)
-    click.echo(f"engine={ENGINE_NAME} mode=htr lang={lang_key}")
+        result = "\n\n".join(page_texts)
+
+    click.echo(
+        f"engine={selected_engine} mode=htr lang={lang_key} pages={len(page_texts)}"
+    )
     if output:
         output_path = Path(output)
         output_path.write_text(result, encoding="utf-8")
