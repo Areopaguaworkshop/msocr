@@ -1,8 +1,8 @@
 [project]
 name = "msocr"
-version = "0.1.0"
+version = "0.20.0"
 description = "Manuscript OCR for Sogdian and Old Turkish using Kraken"
-authors = [{name = "Your Name", email = "your.email@example.com"}]
+authors = [{name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com"}]
 requires-python = ">=3.9"
 dependencies = [
     "kraken>=5.0.0",

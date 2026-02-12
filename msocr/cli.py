@@ -283,7 +283,7 @@ def preprocess(input_dir):
     click.echo(f"Preprocessed images saved to {output_dir}")
 
 
-@main.command(name="benchmark-printed")
+@main.command(name="benchmark")
 @click.option(
     "--manifest",
     required=True,
@@ -322,7 +322,7 @@ def benchmark_printed(manifest, output, cer_threshold):
     click.echo(f"report={output}")
 
 
-@main.command(name="serve-api")
+@main.command(name="api")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
 @click.option("--port", default=8000, show_default=True, type=int, help="Bind port")
 @click.option("--reload", is_flag=True, help="Enable auto-reload for development")
@@ -333,7 +333,7 @@ def serve_api(host, port, reload):
     uvicorn.run("msocr.service.api:app", host=host, port=port, reload=reload)
 
 
-@main.command(name="demo-gradio")
+@main.command(name="demo")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
 @click.option("--port", default=7860, show_default=True, type=int, help="Bind port")
 @click.option(

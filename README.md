@@ -10,9 +10,9 @@ Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract 
   - `htr` (handwritten OCR/HTR, image/PDF input)
   - `train` (Kraken ketos training)
   - `preprocess`
-  - `benchmark-printed`
-  - `serve-api`
-  - `demo-gradio`
+  - `benchmark`
+  - `api`
+  - `demo`
 - Printed OCR routing:
   - Greek: Kraken primary + Kraken fallback models
   - Latin: Kraken CATMuS-Print Large primary + Tesseract fallback
@@ -59,7 +59,7 @@ uv run msocr htr --lang latin /path/to/line_or_page.png
 
 ### 4. Benchmark (printed)
 ```bash
-uv run msocr benchmark-printed \
+uv run msocr benchmark \
   --manifest test/benchmarks/manifests/printed_all.json \
   --output output/benchmarks/printed_all_report.json \
   --cer-threshold 0.05
@@ -67,12 +67,12 @@ uv run msocr benchmark-printed \
 
 ### 5. Start API backend
 ```bash
-uv run msocr serve-api --host 127.0.0.1 --port 8000
+uv run msocr api --host 127.0.0.1 --port 8000
 ```
 
 ### 6. Start Gradio demo
 ```bash
-uv run msocr demo-gradio --host 127.0.0.1 --port 7860
+uv run msocr demo --host 127.0.0.1 --port 7860
 ```
 
 ## CLI Reference
@@ -106,7 +106,7 @@ uv run msocr train --lang <lang> --mode ocr|htr [--config ...] [--gt-dir ...|--g
 
 ## API Endpoints
 
-When running `serve-api`:
+When running `api`:
 - `GET /health`
 - `POST /ocr`
 - `POST /htr`
