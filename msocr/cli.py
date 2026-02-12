@@ -14,6 +14,10 @@ LANG_CHOICES = click.Choice(
     case_sensitive=False,
 )
 MODE_CHOICES = click.Choice(["ocr", "htr"], case_sensitive=False)
+OUTPUT_FORMAT_CHOICES = click.Choice(
+    ["json", "pdf", "markdown"],
+    case_sensitive=False,
+)
 
 ENGINE_NAME = "kraken"
 
@@ -65,6 +69,37 @@ def _collect_xml_files(gt_dir: Path, gt_file: str) -> List[Path]:
     return xml_files
 
 
+def _parse_output_formats(format_str: str) -> List[str]:
+    return [f.strip().lower() for f in format_str.split(",")]
+
+
+def _resolve_output_path(
+    output_arg: str | None,
+    input_path: Path,
+    output_format: str,
+    mode: str,
+) -> Path | None:
+    if output_arg is None:
+        return None
+
+    output_path = Path(output_arg)
+    if output_path.is_dir():
+        base_name = input_path.stem
+        ext = _get_extension_for_format(output_format, mode)
+        return output_path / f"{base_name}{ext}"
+    else:
+        return output_path
+
+
+def _get_extension_for_format(output_format: str, mode: str) -> str:
+    if output_format == "pdf":
+        return ".pdf"
+    elif output_format == "markdown":
+        return ".md"
+    else:
+        return ".json"
+
+
 @click.group()
 def main():
     """Manuscript OCR CLI using the Kraken engine."""
@@ -104,7 +139,15 @@ def main():
     show_default=True,
     help="CER threshold for Syriac Serto/East trained-model trigger",
 )
-@click.option("--output", "-o", help="Output text path")
+@click.option(
+    "--output-format",
+    "-f",
+    type=OUTPUT_FORMAT_CHOICES,
+    default="json",
+    show_default=True,
+    help="Output format: json, pdf, or markdown (comma-separated for multiple)",
+)
+@click.option("--output", "-o", help="Output path (file or directory)")
 @click.option("--device", default="cpu", show_default=True, help="Inference device")
 def ocr(
     input_path,
@@ -114,12 +157,14 @@ def ocr(
     syriac_variant,
     reference_text,
     cer_threshold,
+    output_format,
     output,
     device,
 ):
     """Run printed OCR for image or PDF input."""
     from msocr.pipelines.printed_ocr import run_printed_ocr
     from msocr.utils.input_loader import expand_input_to_images
+    from msocr.output.formats import save_output
 
     if not input_path.exists():
         raise click.ClickException(f"Input not found: {input_path}")
@@ -127,13 +172,17 @@ def ocr(
     if model and not Path(model).exists():
         raise click.ClickException(f"Model file not found: {Path(model)}")
 
+    formats = _parse_output_formats(output_format)
+    if "pdf" in formats and "pdf" not in _parse_output_formats("json,pdf,markdown"):
+        formats = list(set(formats))
+
     with tempfile.TemporaryDirectory(prefix="msocr-ocr-") as td:
         try:
             image_paths = expand_input_to_images(input_path, Path(td))
         except Exception as exc:
             raise click.ClickException(str(exc)) from exc
 
-        page_texts = []
+        page_results = []
         selected_engine = "unknown"
         for idx, image_path in enumerate(image_paths, start=1):
             pipeline_result = run_printed_ocr(
@@ -147,22 +196,48 @@ def ocr(
                 cer_threshold=cer_threshold,
             )
             selected_engine = pipeline_result["engine"]
-            if len(image_paths) == 1:
-                page_texts.append(pipeline_result["text"])
-            else:
-                page_texts.append(f"[page {idx}]\n{pipeline_result['text']}")
-
-        result = "\n\n".join(page_texts)
+            page_results.append(
+                {
+                    "page_number": idx,
+                    "text": pipeline_result["text"],
+                    "image_path": str(image_path),
+                }
+            )
 
     click.echo(
-        f"engine={selected_engine} mode=ocr lang={_normalize_lang(lang)} pages={len(page_texts)}"
+        f"engine={selected_engine} mode=ocr lang={_normalize_lang(lang)} pages={len(page_results)}"
     )
-    if output:
-        output_path = Path(output)
-        output_path.write_text(result, encoding="utf-8")
-        click.echo(f"OCR result saved to {output_path}")
-    else:
-        click.echo(result)
+
+    output_data = {
+        "mode": "ocr",
+        "language": _normalize_lang(lang),
+        "engine": selected_engine,
+        "pages": page_results,
+        "metadata": {
+            "input_file": str(input_path),
+        },
+    }
+
+    for fmt in formats:
+        if fmt == "pdf":
+            output_path = _resolve_output_path(output, input_path, fmt, "ocr")
+            save_output(output_data, image_paths, fmt, output_path)
+            click.echo(f"Searchable PDF saved to {output_path}")
+        else:
+            output_path = _resolve_output_path(output, input_path, fmt, "ocr")
+            save_output(output_data, image_paths, fmt, output_path)
+            if output_path:
+                click.echo(f"{fmt.upper()} result saved to {output_path}")
+            else:
+                if fmt == "json":
+                    import json
+
+                    click.echo(json.dumps(output_data, ensure_ascii=False, indent=2))
+                elif fmt == "markdown":
+                    from msocr.output.formats import _generate_markdown
+
+                    md_text = _generate_markdown(output_data)
+                    click.echo(md_text)
 
 
 @main.command()
@@ -180,17 +255,30 @@ def ocr(
     show_default=True,
     help="Handwritten OCR provider selection",
 )
-@click.option("--output", "-o", help="Output text path")
+@click.option(
+    "--output-format",
+    "-f",
+    type=OUTPUT_FORMAT_CHOICES,
+    default="json",
+    show_default=True,
+    help="Output format: json or markdown (comma-separated for multiple, pdf not supported for HTR)",
+)
+@click.option("--output", "-o", help="Output path (file or directory)")
 @click.option("--device", default="cpu", show_default=True, help="Inference device")
-def htr(input_path, lang, model, provider, output, device):
+def htr(input_path, lang, model, provider, output_format, output, device):
     """Run handwritten HTR for image or PDF input."""
     from msocr.service.runtime import run_htr_service
     from msocr.utils.input_loader import expand_input_to_images
+    from msocr.output.formats import save_output
 
     lang_key = _normalize_lang(lang)
     provider_key = provider.lower()
     if not input_path.exists():
         raise click.ClickException(f"Input not found: {input_path}")
+
+    formats = _parse_output_formats(output_format)
+    if "pdf" in formats:
+        click.echo("Warning: PDF format not supported for HTR, ignoring.")
 
     with tempfile.TemporaryDirectory(prefix="msocr-htr-") as td:
         try:
@@ -198,7 +286,7 @@ def htr(input_path, lang, model, provider, output, device):
         except Exception as exc:
             raise click.ClickException(str(exc)) from exc
 
-        page_texts = []
+        page_results = []
         selected_engine = ENGINE_NAME
         for idx, image_path in enumerate(image_paths, start=1):
             try:
@@ -213,22 +301,45 @@ def htr(input_path, lang, model, provider, output, device):
                 raise click.ClickException(str(exc)) from exc
 
             selected_engine = resp["engine"]
-            if len(image_paths) == 1:
-                page_texts.append(resp["text"])
-            else:
-                page_texts.append(f"[page {idx}]\n{resp['text']}")
-
-        result = "\n\n".join(page_texts)
+            page_results.append(
+                {
+                    "page_number": idx,
+                    "text": resp["text"],
+                    "image_path": str(image_path),
+                }
+            )
 
     click.echo(
-        f"engine={selected_engine} mode=htr lang={lang_key} pages={len(page_texts)}"
+        f"engine={selected_engine} mode=htr lang={lang_key} pages={len(page_results)}"
     )
-    if output:
-        output_path = Path(output)
-        output_path.write_text(result, encoding="utf-8")
-        click.echo(f"HTR result saved to {output_path}")
-    else:
-        click.echo(result)
+
+    output_data = {
+        "mode": "htr",
+        "language": lang_key,
+        "engine": selected_engine,
+        "pages": page_results,
+        "metadata": {
+            "input_file": str(input_path),
+        },
+    }
+
+    for fmt in formats:
+        if fmt == "pdf":
+            continue
+        output_path = _resolve_output_path(output, input_path, fmt, "htr")
+        save_output(output_data, image_paths, fmt, output_path)
+        if output_path:
+            click.echo(f"{fmt.upper()} result saved to {output_path}")
+        else:
+            if fmt == "json":
+                import json
+
+                click.echo(json.dumps(output_data, ensure_ascii=False, indent=2))
+            elif fmt == "markdown":
+                from msocr.output.formats import _generate_markdown
+
+                md_text = _generate_markdown(output_data)
+                click.echo(md_text)
 
 
 @main.command()
