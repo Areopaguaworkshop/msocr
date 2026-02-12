@@ -2,7 +2,9 @@
 
 ## Purpose
 - This folder defines the general documentation-first agent specification for `msocr`.
-- You should only write agent mode Markdown and skills, pipeline, source_registry in yaml only, do not write any code.
+- You can write implementation code now, in addition to agent mode Markdown and YAML.
+- All implementation code must be placed under the `msocr/` folder with a structured module layout.
+- Python environment, dependency, and command workflows should use `uv`.
 
 ## Project Context Snapshot
 - Repository: `msocr`
@@ -27,7 +29,9 @@
 6. state_update yaml in output folder 
 
 ## Authoring Rules
-- Do not write code, only do pan with Markdown and Yaml files. 
+- Markdown and YAML remain required for specs, and code implementation is now allowed.
+- Keep all new code under `msocr/` and avoid scattering implementation logic outside the package.
+- Use `uv` for Python package and runtime workflows.
 - Keep claims conservative and implementation-realistic.
 - Separate:
   - printed OCR routing
@@ -48,13 +52,38 @@
 - No marketing language.
 - No exaggerated accuracy claims.
 
+### What Is Done?
+- Core CLI structure is implemented with subcommands for:
+  - `ocr` (printed)
+  - `htr` (handwritten)
+  - `train`
+  - `preprocess`
+- Greek and Latin printed OCR routing is implemented.
+  - Greek printed: Kraken primary + fallback models
+  - Latin printed: Kraken CATMuS-Print Large with Tesseract fallback
+- Greek and Latin handwritten defaults are wired in current runtime.
+- Syriac printed OCR baseline is implemented with Tesseract (`syr`) and variant-aware logic.
+- Coptic printed OCR is implemented with Tesseract (`cop`) route.
+- Armenian and Geez printed OCR routes are implemented with Tesseract.
+  - Armenian prefers local `hye-calfa-n` when available
+- OCRopus/Ocropy fallback is deactivated in current phase.
+- Runtime model/output artifact policy is set to ignore generated assets in git.
+
 ## Next Step
-- Design and maintain the blueprint in Markdown and YAML only.
-- Execute language and mode expansion in this order:
-  1. Greek and Latin printed OCR
-  2. Syriac and Coptic printed OCR
-  3. Greek and Latin handwritten HTR
-  4. Syriac and Coptic handwritten HTR
-  5. Armenia and Geez (both printed OCR and handwritten HTR)
-  6. Sogdian and Old Turkish, with primary focus on handwritten HTR
-- Keep printed OCR and handwritten HTR routes separate in all skills and pipelines.
+- Keep printed OCR and handwritten HTR routes strictly separated in all new modules and tests.
+- Complete benchmark validation on real datasets (CER/WER) for implemented printed routes.
+  - target: printed CER <= 5%
+- Finish Syriac handwritten production path:
+  - use Transkribus platform for initial recognition
+  - export PAGE XML or ALTO XML
+  - train local Kraken Syriac HTR model from exported XML + images
+- Finish Coptic handwritten production path:
+  - use Transkribus workflow for dataset generation
+  - export PAGE XML or ALTO XML with corrected transcriptions
+  - train Kraken HTR model; keep Tesseract as backup training/OCR option
+- Implement Armenian handwritten HTR path:
+  - preprocessing (cleanup, deskew, crop)
+  - layout analysis (eScriptorium or Transkribus)
+  - Kraken training from PAGE/ALTO XML
+- Implement Geez handwritten HTR path with the same preparation and training sequence as Armenian.
+- Align and test Sogdian and Old Turkish handwritten-focused pipeline under the same benchmark/reporting standard.

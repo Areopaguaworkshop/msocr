@@ -4,7 +4,12 @@
 Define a conservative, implementation-ready agent model for manuscript OCR/HTR that:
 - preserves current `msocr` CLI workflow,
 - separates printed and handwritten routes from the beginning,
-- supports Sogdian first, then expands to other patristic languages.
+- starts implementation with Greek/Latin printed OCR, then expands to other patristic languages.
+
+## 1.1 Implementation Constraints
+- All code changes must be under `msocr/`.
+- Implementation should follow structured module boundaries (`data`, `preprocessing`, `models`, `training`, `utils`).
+- Python workflows should use `uv`.
 
 ## 2. Runtime Contract
 ### Required runtime inputs

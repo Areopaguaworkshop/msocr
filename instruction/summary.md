@@ -1,10 +1,15 @@
 # Manuscript OCR System for Church Fathers (`msocr`)
 
 ## 1. Purpose and Scope
-- Build a documentation-first OCR/HTR blueprint for historical Church Fathers corpora.
+- Build and implement an OCR/HTR system for historical Church Fathers corpora.
 - Support both printed OCR and handwritten HTR, with strict route separation.
 - Keep current CLI-compatible flow: `preprocess -> annotation -> train -> ocr`.
-- Start with Sogdian as the fully specified training profile; expand to other languages incrementally.
+- Implementation rollout starts with Greek and Latin printed OCR, then expands incrementally.
+
+## 1.1 Implementation Policy
+- Code implementation is allowed and expected in this phase.
+- All project code must be created under `msocr/` with clear module structure.
+- Use `uv` for environment management, dependency handling, and command execution.
 
 ## 2. Supported Language Status
 ### Implemented in current codebase (training/inference path exists)
@@ -81,3 +86,46 @@
 - This file is a full rewrite baseline for the current planning cycle.
 - Later updates should be incremental and tied to actual project progress.
 - Do not promote planned/external items to implemented until code paths exist and are validated.
+- Keep documentation and implementation synchronized: when route logic changes in code, update the corresponding YAML and Markdown specs in the same cycle.
+
+## 10. Current Execution Notes (Syriac and Coptic)
+### Syriac handwritten (current decision)
+- Transkribus Syriac models are used on platform for first-pass HTR, but model download is not assumed in local runtime.
+- Practical workflow:
+  - run HTR in Transkribus platform
+  - export PAGE XML or ALTO XML with corrected text
+  - use exported XML + images as training data for Kraken in `msocr`
+- This is the current bridge for building local Syriac HTR capability.
+
+### Syriac printed
+- Baseline OCR uses Tesseract (`syr`) for printed Syriac, especially Estrangela.
+- For Serto/East Syriac, if measured CER is above target threshold, switch to custom trained Tesseract model when available.
+
+### Coptic printed
+- Primary OCR path: Tesseract (`cop`).
+- OCRopus/Ocropy fallback is deactivated in current implementation phase.
+
+### Coptic handwritten (HTR)
+- Production path requires custom HTR training (Kraken-first).
+- Backup training option: Tesseract training workflow for specific corpora where Kraken is not yet tuned.
+- If HTR code is not yet implemented for Coptic in runtime, keep this as a planned training milestone with explicit dataset and benchmark gates.
+
+### Armenian printed
+- Practical baseline in this project: Tesseract OCR.
+- Use `hye-calfa-n` traineddata when available as preferred Armenian printed model; fallback to standard `hye`.
+- `potmind/armenian-ocr` fallback is dropped in this phase; Armenian printed OCR is Tesseract-only.
+
+### Armenian handwritten (HTR)
+- Follow manuscript HTR preparation workflow:
+  - image cleanup (noise removal, deskew, crop)
+  - layout analysis (eScriptorium or Transkribus)
+  - line-level training in Kraken
+- Note: CALFA OCR commercial route exists and may be used externally where licensing permits.
+
+### Geez printed
+- Use Tesseract OCR route for printed material.
+
+### Geez handwritten (HTR)
+- Use the same preparation and training strategy as Armenian handwritten:
+  - preprocessing and layout analysis first
+  - Kraken custom HTR training on exported XML/image pairs
