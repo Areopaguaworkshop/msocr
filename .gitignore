@@ -12,3 +12,6 @@ wheels/
 # Project runtime artifacts
 models/
 output/
+
+# Test folder
+test/
