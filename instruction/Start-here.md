@@ -68,6 +68,7 @@
   - Armenian prefers local `hye-calfa-n` when available
 - OCRopus/Ocropy fallback is deactivated in current phase.
 - Runtime model/output artifact policy is set to ignore generated assets in git.
+- FastAPI backend and Gradio browser demo layers are implemented for non-CLI usage.
 
 ## Next Step
 - Keep printed OCR and handwritten HTR routes strictly separated in all new modules and tests.

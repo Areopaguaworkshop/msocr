@@ -76,6 +76,8 @@ integration:
         - msocr/preprocessing/pipeline.py
         - msocr/training/ketos_trainer.py
         - msocr/models/inference.py
+        - msocr/service/api.py
+        - msocr/service/gradio_demo.py
     planned_modules:
         - script_mode_classifier
         - advanced_router

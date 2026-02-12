@@ -16,6 +16,9 @@ dependencies = [
     "marimo>=0.1.0",
     "torch>=2.0.0",
     "torchvision>=0.15.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "gradio>=4.44.0",
 ]
 
 [project.optional-dependencies]

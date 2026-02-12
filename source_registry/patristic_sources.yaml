@@ -3,157 +3,173 @@ id: source_registry.patristic
 title: Patristic OCR/HTR Source Registry
 purpose: Register model, lexicon, and integration sources with explicit implementation status.
 scope:
-  project: msocr
-  languages:
-    - name: sogdian
-      status: active
-    - name: old_turkish
-      status: active
-    - name: greek
-      status: planned
-    - name: latin
-      status: planned
-    - name: syriac
-      status: planned
-    - name: coptic
-      status: planned
-  writing_modes:
-    - printed
-    - handwritten
+    project: msocr
+    languages:
+        - name: sogdian
+          status: active
+        - name: old_turkish
+          status: active
+        - name: greek
+          status: planned
+        - name: latin
+          status: planned
+        - name: syriac
+          status: planned
+        - name: coptic
+          status: planned
+    writing_modes:
+        - printed
+        - handwritten
 inputs:
-  required:
-    - source_id
-    - source_type
-    - language
-    - status
-  optional:
-    - version
-    - notes
+    required:
+        - source_id
+        - source_type
+        - language
+        - status
+    optional:
+        - version
+        - notes
 workflow:
-  - step_id: SR1
-    name: register_source
-    action: Add source metadata with status implemented, planned, or external.
-  - step_id: SR2
-    name: validate_claims
-    action: Keep model availability statements conservative.
-  - step_id: SR3
-    name: link_pipelines
-    action: Reference source IDs from skill and pipeline YAMLs.
+    - step_id: SR1
+      name: register_source
+      action: Add source metadata with status implemented, planned, or external.
+    - step_id: SR2
+      name: validate_claims
+      action: Keep model availability statements conservative.
+    - step_id: SR3
+      name: link_pipelines
+      action: Reference source IDs from skill and pipeline YAMLs.
 metrics:
-  primary:
-    - source_traceability_coverage
-  secondary:
-    - status_accuracy_rate
+    primary:
+        - source_traceability_coverage
+    secondary:
+        - status_accuracy_rate
 thresholds:
-  registry:
-    min_traceability_coverage: 1.0
-  rule: All active pipeline items must map to a source or planned placeholder.
+    registry:
+        min_traceability_coverage: 1.0
+    rule: All active pipeline items must map to a source or planned placeholder.
 fallback:
-  missing_source_mapping:
-    - mark_item_unresolved
-    - block_promotion_to_implemented
+    missing_source_mapping:
+        - mark_item_unresolved
+        - block_promotion_to_implemented
 outputs:
-  artifacts:
-    - source_registry_table
-    - status_annotations
+    artifacts:
+        - source_registry_table
+        - status_annotations
 integration:
-  implemented_modules:
-    - msocr/data/manager.py
-  planned_modules:
-    - registry_validation_hook
+    implemented_modules:
+        - msocr/data/manager.py
+    planned_modules:
+        - registry_validation_hook
 status:
-  maturity: active_blueprint
-  implementation_state: documentation_defined
+    maturity: active_blueprint
+    implementation_state: documentation_defined
 owners:
-  - role: source_governance
-    team: msocr
+    - role: source_governance
+      team: msocr
 last_updated: 2026-02-12
 registry:
-  - source_id: model.kraken.sogdian.base
-    source_type: model
-    language: sogdian
-    writing_mode: printed
-    engine: kraken
-    status: implemented
-    location: configs/sogdian_config.yaml
-    note: Existing training path in repository.
-  - source_id: model.kraken.sogdian.htr
-    source_type: model
-    language: sogdian
-    writing_mode: handwritten
-    engine: kraken
-    status: planned
-    location: pipeline/handwritten_htr_training.yaml
-    note: Custom HTR training expected.
-  - source_id: model.kraken.old_turkish.base
-    source_type: model
-    language: old_turkish
-    writing_mode: printed
-    engine: kraken
-    status: implemented
-    location: configs/old_turkish_config.yaml
-    note: RTL configuration available.
-  - source_id: model.kraken.old_turkish.htr
-    source_type: model
-    language: old_turkish
-    writing_mode: handwritten
-    engine: kraken
-    status: planned
-    location: pipeline/handwritten_htr_training.yaml
-    note: Custom HTR training expected.
-  - source_id: model.kraken.greek.printed
-    source_type: model
-    language: greek
-    writing_mode: printed
-    engine: kraken
-    status: planned
-    location: instruction/agent.patristic.ocr.model.md
-    note: Planned profile only.
-  - source_id: model.kraken.latin.printed
-    source_type: model
-    language: latin
-    writing_mode: printed
-    engine: kraken
-    status: planned
-    location: instruction/agent.patristic.ocr.model.md
-    note: Planned profile only.
-  - source_id: model.kraken.syriac.htr
-    source_type: model
-    language: syriac
-    writing_mode: handwritten
-    engine: kraken
-    status: planned
-    location: instruction/agent.patristic.ocr.model.md
-    note: No strong public handwritten model assumed; custom HTR training required.
-  - source_id: model.kraken.coptic.htr
-    source_type: model
-    language: coptic
-    writing_mode: handwritten
-    engine: kraken
-    status: planned
-    location: instruction/agent.patristic.ocr.model.md
-    note: No strong public handwritten model assumed; custom HTR training required.
-  - source_id: integration.escriptorium
+    - source_id: model.kraken.sogdian.base
+      source_type: model
+      language: sogdian
+      writing_mode: printed
+      engine: kraken
+      status: implemented
+      location: configs/sogdian_config.yaml
+      note: Existing training path in repository.
+    - source_id: model.kraken.sogdian.htr
+      source_type: model
+      language: sogdian
+      writing_mode: handwritten
+      engine: kraken
+      status: planned
+      location: pipeline/handwritten_htr_training.yaml
+      note: Custom HTR training expected.
+    - source_id: model.kraken.old_turkish.base
+      source_type: model
+      language: old_turkish
+      writing_mode: printed
+      engine: kraken
+      status: implemented
+      location: configs/old_turkish_config.yaml
+      note: RTL configuration available.
+    - source_id: model.kraken.old_turkish.htr
+      source_type: model
+      language: old_turkish
+      writing_mode: handwritten
+      engine: kraken
+      status: planned
+      location: pipeline/handwritten_htr_training.yaml
+      note: Custom HTR training expected.
+    - source_id: model.kraken.greek.printed
+      source_type: model
+      language: greek
+      writing_mode: printed
+      engine: kraken
+      status: planned
+      location: instruction/agent.patristic.ocr.model.md
+      note: Planned profile only.
+    - source_id: model.kraken.latin.printed
+      source_type: model
+      language: latin
+      writing_mode: printed
+      engine: kraken
+      status: planned
+      location: instruction/agent.patristic.ocr.model.md
+      note: Planned profile only.
+    - source_id: model.kraken.syriac.htr
+      source_type: model
+      language: syriac
+      writing_mode: handwritten
+      engine: kraken
+      status: planned
+      location: instruction/agent.patristic.ocr.model.md
+      note: No strong public handwritten model assumed; custom HTR training required.
+    - source_id: model.kraken.coptic.htr
+      source_type: model
+      language: coptic
+      writing_mode: handwritten
+      engine: kraken
+      status: planned
+      location: instruction/agent.patristic.ocr.model.md
+      note: No strong public handwritten model assumed; custom HTR training required.
+    - source_id: integration.escriptorium
+      source_type: integration
+      language: multi
+      writing_mode: handwritten
+      engine: external
+      status: external
+      location: instruction/summary.md
+      note: Optional external workflow connector.
+    - source_id: integration.transkribus
+      source_type: integration
+      language: multi
+      writing_mode: handwritten
+      engine: external
+      status: external
+      location: instruction/summary.md
+      note: Optional external workflow connector.
+  - source_id: integration.fastapi.backend
     source_type: integration
     language: multi
-    writing_mode: handwritten
-    engine: external
-    status: external
-    location: instruction/summary.md
-    note: Optional external workflow connector.
-  - source_id: integration.transkribus
-    source_type: integration
-    language: multi
-    writing_mode: handwritten
-    engine: external
-    status: external
-    location: instruction/summary.md
-    note: Optional external workflow connector.
-  - source_id: resource.lexicon.syriac
-    source_type: lexicon
-    language: syriac
     writing_mode: both
-    engine: external
-    status: planned
-    location: skill/post_ocr_correction.yaml
-    note: Planned lexicon validation source.
+    engine: internal
+    status: implemented
+    location: msocr/service/api.py
+    note: API backend layer for OCR/HTR service endpoints is implemented.
+  - source_id: integration.gradio.demo
+    source_type: integration
+    language: multi
+    writing_mode: both
+    engine: internal
+    status: implemented
+    location: msocr/service/gradio_demo.py
+    note: Browser demo layer for interactive OCR/HTR testing is implemented.
+    - source_id: resource.lexicon.syriac
+      source_type: lexicon
+      language: syriac
+      writing_mode: both
+      engine: external
+      status: planned
+      location: skill/post_ocr_correction.yaml
+      note: Planned lexicon validation source.

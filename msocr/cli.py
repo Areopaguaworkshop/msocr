@@ -253,5 +253,69 @@ def preprocess(input_dir):
     click.echo(f"Preprocessed images saved to {output_dir}")
 
 
+@main.command(name="benchmark-printed")
+@click.option(
+    "--manifest",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Benchmark manifest path (.json or .jsonl)",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=Path("output/benchmarks/printed_report.json"),
+    show_default=True,
+    help="Benchmark report output path",
+)
+@click.option(
+    "--cer-threshold",
+    type=float,
+    default=0.05,
+    show_default=True,
+    help="CER pass threshold for printed benchmark",
+)
+def benchmark_printed(manifest, output, cer_threshold):
+    """Run printed OCR benchmark and write a JSON report."""
+    from msocr.evaluation.printed_benchmark import run_printed_benchmark
+
+    report = run_printed_benchmark(
+        manifest_path=manifest,
+        output_path=output,
+        cer_threshold=cer_threshold,
+    )
+    click.echo(
+        "benchmark=printed "
+        f"total={report['total_cases']} ok={report['ok_cases']} "
+        f"errors={report['error_cases']} pass_rate={report['pass_rate']:.3f}"
+    )
+    click.echo(f"report={output}")
+
+
+@main.command(name="serve-api")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
+@click.option("--port", default=8000, show_default=True, type=int, help="Bind port")
+@click.option("--reload", is_flag=True, help="Enable auto-reload for development")
+def serve_api(host, port, reload):
+    """Run FastAPI backend service."""
+    import uvicorn
+
+    uvicorn.run("msocr.service.api:app", host=host, port=port, reload=reload)
+
+
+@main.command(name="demo-gradio")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
+@click.option("--port", default=7860, show_default=True, type=int, help="Bind port")
+@click.option(
+    "--share", is_flag=True, help="Enable Gradio public sharing link (if supported)"
+)
+def demo_gradio(host, port, share):
+    """Run Gradio browser demo."""
+    from msocr.service.gradio_demo import build_demo
+
+    demo = build_demo()
+    demo.launch(server_name=host, server_port=port, share=share)
+
+
 if __name__ == "__main__":
     main()

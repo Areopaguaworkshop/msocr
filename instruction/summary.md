@@ -65,6 +65,8 @@
 - Preprocessing pipeline: `msocr/preprocessing/pipeline.py`
 - Inference wrapper: `msocr/models/inference.py`
 - Kraken training wrapper: `msocr/training/ketos_trainer.py`
+- FastAPI backend service: `msocr/service/api.py`
+- Gradio demo service: `msocr/service/gradio_demo.py`
 
 ### Planned additions
 - script/language + mode classifier layer

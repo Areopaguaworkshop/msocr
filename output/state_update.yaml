@@ -93,12 +93,19 @@ completion_table:
     - item: output/state_update.yaml
       status: completed
       note: This state record.
+    - item: msocr/service/api.py
+      status: completed
+      note: FastAPI backend service module added.
+    - item: msocr/service/gradio_demo.py
+      status: completed
+      note: Gradio demo service module added.
 open_risks:
     - Planned modules are not yet implemented in code.
     - Handwritten models for Syriac and Coptic require custom training data.
     - Threshold targets may require dataset-specific recalibration.
 next_actions:
-    - Begin implementation of Greek and Latin printed OCR pipeline in msocr modules.
+    - Complete benchmark validation on real manuscript datasets for printed routes.
+    - Implement Syriac/Coptic/Armenian/Geez handwritten production workflows.
     - Use uv-managed commands for environment and execution workflows.
     - Keep docs and YAML specs synchronized with each implementation milestone.
 repo_policy:
