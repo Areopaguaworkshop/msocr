@@ -23,7 +23,7 @@ class OCRRequest(BaseModel):
     model: Optional[str] = Field(
         default=None, description="Optional model path override"
     )
-    engine: Literal["auto", "kraken", "tesseract"] = "auto"
+    engine: Literal["auto", "kraken", "tesseract", "ocrmypdf"] = "auto"
     variant: Literal["default", "estrangela", "serto", "east"] = "default"
     reference_text_path: Optional[str] = None
     cer_threshold: float = 0.05

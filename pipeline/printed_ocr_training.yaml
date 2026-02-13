@@ -1,7 +1,10 @@
 schema_version: msocr.docspec.v1
 id: pipeline.printed_ocr_training
 title: Printed OCR Training Pipeline
-purpose: Define high-accuracy printed OCR training and evaluation flow.
+purpose: Define high-accuracy printed OCR training and evaluation flow with CATMuS-Print Large (2024-01-30) for Latin.
+notes: |
+  Updated to use CATMuS-Print Large (DOI: 10.5281/zenodo.10592716) for printed Latin OCR.
+  Accuracy: 98.56%, CER: 1.44%. Baseline segmentation now properly configured.
 scope:
     project: msocr
     languages:
@@ -86,4 +89,4 @@ status:
 owners:
     - role: printed_ocr
       team: msocr
-last_updated: 2026-02-12
+last_updated: 2026-02-13

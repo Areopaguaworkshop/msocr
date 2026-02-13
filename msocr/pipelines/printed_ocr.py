@@ -1,7 +1,8 @@
 """Printed OCR routing pipeline.
 
-Greek printed OCR uses Tesseract (grc) as primary with Kraken fallback.
-Latin printed OCR uses Kraken CATMuS-Print Large with Tesseract fallback.
+Greek printed OCR uses ocrmypdf (Tesseract engine) as default.
+Latin printed OCR uses Kraken CATMuS-Print Large (2024-01-30, 98.56% accuracy, CER 1.44%)
+  with Tesseract fallback. Also supports CATMuS Medieval for handwritten Latin.
 Syriac printed OCR uses Tesseract (Estrangela baseline), with optional
 CER-gated switch to custom Serto/East Syriac Tesseract models.
 """
@@ -24,21 +25,12 @@ class PrintedOCRResult(TypedDict):
     language: str
 
 
-GREEK_PRIMARY_MODEL = Path(
-    "models/kraken/greek-english_porson_sophoclesplaysa05campgoog/"
-    "greek-english_porson_sophoclesplaysa05campgoog.mlmodel"
-)
-GREEK_FALLBACK_MODELS = [
-    Path(
-        "models/kraken/greek-german_serifs_sophokle1v3soph/"
-        "greek-german_serifs_sophokle1v3soph.mlmodel"
-    ),
-    Path(
-        "models/kraken/greek-german_serifs_bsb10234118/"
-        "greek-german_serifs_bsb10234118.mlmodel"
-    ),
-]
-LATIN_PRIMARY_MODEL = Path("models/kraken/latin_printed_catmus_large.mlmodel")
+# CATMuS-Print Large (2024-01-30): Latest model for printed Latin (98.56% accuracy, CER 1.44%)
+# DOI: 10.5281/zenodo.10592716
+LATIN_PRIMARY_MODEL = Path("models/kraken/catmus-print-fondue-large.mlmodel")
+# CATMuS Medieval: For handwritten Latin manuscripts (8-15th century)
+# DOI: 10.5281/zenodo.10066218
+LATIN_SECONDARY_MODEL = Path("models/kraken/catmus-medieval-1.5.0.mlmodel")
 SYRIAC_TESSDATA_DIR = Path("models/tesseract")
 SYRIAC_SERTO_LANG = "syr_serto"
 SYRIAC_EAST_LANG = "syr_east"
@@ -46,6 +38,67 @@ COPTIC_TESSDATA_DIR = Path("models/tesseract")
 COPTIC_LOCAL_MODEL = COPTIC_TESSDATA_DIR / "cop.traineddata"
 ARMENIAN_TESSDATA_DIR = Path("models/tesseract")
 ARMENIAN_LOCAL_MODEL = ARMENIAN_TESSDATA_DIR / "hye-calfa-n.traineddata"
+
+
+def _run_ocrmypdf(
+    image_path: Path,
+    lang: str = "grc",
+) -> str:
+    """Run ocrmypdf for OCR on images/PDFs using Tesseract engine."""
+    if shutil.which("ocrmypdf") is None:
+        raise ClickException(
+            "ocrmypdf not found on PATH. Install ocrmypdf to run Greek OCR: pip install ocrmypdf"
+        )
+
+    from PIL import Image
+
+    temp_image_path: Optional[Path] = None
+    try:
+        with Image.open(image_path) as img:
+            if img.mode == "RGBA" or img.mode == "LA":
+                rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+                rgb_img.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
+                temp_image_path = image_path.with_suffix(".png")
+                rgb_img.save(temp_image_path)
+                image_path = temp_image_path
+            elif img.mode != "RGB":
+                temp_image_path = image_path.with_suffix(".png")
+                img.convert("RGB").save(temp_image_path)
+                image_path = temp_image_path
+    except Exception as e:
+        if temp_image_path and temp_image_path.exists():
+            temp_image_path.unlink()
+        raise ClickException(f"Failed to preprocess image: {e}") from e
+
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        cmd = [
+            "ocrmypdf",
+            "--sidecar", str(tmp_path),
+            "-l", lang,
+            "--image-dpi", "300",
+            "--skip-text",
+            str(image_path),
+            "/dev/null",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        tmp_path.unlink(missing_ok=True)
+        error_output = exc.stderr.strip() if exc.stderr else str(exc)
+        raise ClickException(f"ocrmypdf failed: {error_output}") from exc
+
+    try:
+        text = tmp_path.read_text(encoding="utf-8")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+        if temp_image_path and temp_image_path.exists():
+            temp_image_path.unlink()
+
+    return text.strip()
 
 
 def _run_tesseract(
@@ -86,22 +139,9 @@ def _run_tesseract_with_lang_fallback(
     raise ClickException("No usable Tesseract language candidates were provided.")
 
 
-def _resolve_greek_model(model: Optional[str]) -> Path:
-    if model:
-        candidate = Path(model)
-    else:
-        candidate = GREEK_PRIMARY_MODEL
-    if not candidate.exists():
-        raise ClickException(
-            f"Greek Kraken model not found: {candidate}. "
-            "Provide --model or place the default model in models/kraken/."
-        )
-    return candidate
-
-
-def _run_kraken_with_fallback(image_path: Path, model_path: Path, device: str) -> str:
-    text = predict(str(image_path), str(model_path), device=device).strip()
-    if text and not text.startswith("Error:"):
+def _run_kraken_with_fallback(image_path: Path, model_path: Path, device: str, segmentation_type: str = "baseline", min_length: int = 10) -> str:
+    text = predict(str(image_path), str(model_path), device=device, segmentation_type=segmentation_type).strip()
+    if text and not text.startswith("Error:") and len(text) >= min_length:
         return text
     return ""
 
@@ -187,56 +227,28 @@ def run_printed_ocr(
         )
 
     if lang_key == "greek":
-        if engine_key == "kraken":
-            if model:
-                model_path = Path(model)
-            else:
-                model_path = GREEK_PRIMARY_MODEL
-            if not model_path.exists():
-                raise ClickException(
-                    f"Greek Kraken model not found: {model_path}. "
-                    "Provide --model or place the default model in models/kraken/."
-                )
-            text = _run_kraken_with_fallback(image_path, model_path, device)
+        if engine_key == "auto":
+            # Default to ocrmypdf (Tesseract engine) for Greek
+            text = _run_ocrmypdf(image_path, lang="grc")
             if text:
-                return {"text": text, "engine": "kraken", "language": lang_key}
-
-            for fallback_model in GREEK_FALLBACK_MODELS:
-                if not fallback_model.exists():
-                    continue
-                text = _run_kraken_with_fallback(image_path, fallback_model, device)
-                if text:
-                    return {"text": text, "engine": "kraken", "language": lang_key}
-
+                return {"text": text, "engine": "ocrmypdf", "language": lang_key}
             raise ClickException(
-                "Greek Kraken OCR returned empty output with primary and fallback models."
+                "Greek OCR returned empty output with ocrmypdf."
             )
 
-        if engine_key in ("auto", "tesseract"):
+        if engine_key == "ocrmypdf":
+            text = _run_ocrmypdf(image_path, lang="grc")
+            if text:
+                return {"text": text, "engine": "ocrmypdf", "language": lang_key}
+            raise ClickException("Greek ocrmypdf OCR returned empty output.")
+
+        if engine_key == "tesseract":
             text = _run_tesseract(image_path, "grc")
             if text:
                 return {"text": text, "engine": "tesseract", "language": lang_key}
+            raise ClickException("Greek Tesseract OCR returned empty output.")
 
-            if engine_key == "tesseract":
-                raise ClickException("Greek Tesseract OCR returned empty output.")
-
-            primary_model = _resolve_greek_model(model) if model else GREEK_PRIMARY_MODEL
-            text = _run_kraken_with_fallback(image_path, primary_model, device)
-            if text:
-                return {"text": text, "engine": "kraken", "language": lang_key}
-
-            for fallback_model in GREEK_FALLBACK_MODELS:
-                if not fallback_model.exists():
-                    continue
-                text = _run_kraken_with_fallback(image_path, fallback_model, device)
-                if text:
-                    return {"text": text, "engine": "kraken", "language": lang_key}
-
-            raise ClickException(
-                "Greek OCR returned empty output with Tesseract and Kraken models."
-            )
-
-        raise ClickException("Unsupported engine for Greek. Use auto, tesseract, or kraken.")
+        raise ClickException("Unsupported engine for Greek. Use auto, ocrmypdf, or tesseract.")
 
     if lang_key == "syriac":
         if engine_key == "kraken":

@@ -70,31 +70,80 @@ class OCRModel:
             logger.error(f"Error preprocessing {image_path}: {e}")
             raise
 
-    def predict_line(self, image_path: Path) -> Dict[str, Any]:
-        """Predict text from a single line image."""
+    def predict_line(self, image_path: Path, segmentation_type: str = "baseline") -> Dict[str, Any]:
+        """Predict text from a single line image.
+        
+        Args:
+            image_path: Path to the image file
+            segmentation_type: Type of segmentation to use - "baseline" for modern Kraken models
+                             or "bbox" for legacy models trained on bounding box segmentation
+        """
         if not self.model:
             raise RuntimeError("Model not loaded")
-
+    
         try:
             # Preprocess image
             processed_img = self.preprocess_image(image_path)
-
-            # Build a simple single-bbox segmentation covering the full image.
-            # This avoids requiring an external page segmentation step for CLI use.
-            from kraken.containers import Segmentation, BBoxLine
-
+    
+            from kraken.containers import Segmentation, BaselineLine, BBoxLine
+    
             width, height = processed_img.size
-            bounds = Segmentation(
-                type="bbox",
-                imagename=str(image_path),
-                text_direction="horizontal-lr",
-                script_detection=False,
-                lines=[BBoxLine(id="0", bbox=(0, 0, width, height), type="bbox")],
-                regions=None,
-                line_orders=None,
-                language=None,
-            )
-
+            
+            if segmentation_type == "baseline":
+                # Baseline segmentation for modern Kraken models (e.g., CATMuS)
+                # For full page images, use middle baseline with safe margins
+                # For single-line images, baseline at 2/3 of height works better
+                if height > 300:  # Assume full page if height > 300px
+                    baseline_y = height // 2
+                    boundary = [
+                        (0, int(height * 0.3)),        # top-left
+                        (width, int(height * 0.3)),    # top-right
+                        (width, int(height * 0.7)),    # bottom-right
+                        (0, int(height * 0.7)),        # bottom-left
+                    ]
+                else:  # Single-line image
+                    baseline_y = int(height * 2 / 3)
+                    boundary = [
+                        (0, int(height * 0.1)),        # top-left
+                        (width, int(height * 0.1)),    # top-right
+                        (width, int(height * 0.9)),    # bottom-right
+                        (0, int(height * 0.9)),        # bottom-left
+                    ]
+                # Create baseline points along the width
+                baseline = [(0, baseline_y), (width, baseline_y)]
+                bounds = Segmentation(
+                    type="baselines",
+                    imagename=str(image_path),
+                    text_direction="horizontal-lr",
+                    script_detection=False,
+                    lines=[BaselineLine(
+                        id="0",
+                        baseline=baseline,
+                        boundary=boundary
+                    )],
+                    regions=None,
+                    line_orders=None,
+                    language=None,
+                )
+            else:  # bbox segmentation
+                # Bounding box segmentation for legacy models (e.g., Greek models)
+                # Add small padding to avoid "Line polygon outside of image bounds" error
+                pad = 2
+                bbox = (pad, pad, width - pad, height - pad)
+                bounds = Segmentation(
+                    type="bbox",
+                    imagename=str(image_path),
+                    text_direction="horizontal-lr",
+                    script_detection=False,
+                    lines=[BBoxLine(
+                        id="0",
+                        bbox=bbox
+                    )],
+                    regions=None,
+                    line_orders=None,
+                    language=None,
+                )
+    
             # Perform OCR with explicit segmentation bounds.
             result = rpred(self.model, processed_img, bounds)
 
@@ -165,7 +214,7 @@ class OCRModel:
             }
 
 
-def predict(image_path: str, model_path: str, device: str = "cpu") -> str:
+def predict(image_path: str, model_path: str, device: str = "cpu", segmentation_type: str = "baseline") -> str:
     """
     Convenience function for OCR prediction.
 
@@ -173,6 +222,7 @@ def predict(image_path: str, model_path: str, device: str = "cpu") -> str:
         image_path: Path to the image file
         model_path: Path to the trained model
         device: Device to use for inference
+        segmentation_type: Type of segmentation - "baseline" or "bbox"
 
     Returns:
         OCR result as text
@@ -183,7 +233,7 @@ def predict(image_path: str, model_path: str, device: str = "cpu") -> str:
         model.set_device(device)
 
         # Perform prediction
-        result = model.predict_line(Path(image_path))
+        result = model.predict_line(Path(image_path), segmentation_type=segmentation_type)
 
         # Return text
         return result.get("full_text", "")

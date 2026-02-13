@@ -14,16 +14,16 @@ Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract 
   - `api`
   - `demo`
 - Printed OCR routing:
-  - Greek: Kraken primary + Kraken fallback models
-  - Latin: Kraken CATMuS-Print Large primary + Tesseract fallback
-  - Syriac: Tesseract `syr` baseline with optional Serto/East CER-gated traineddata switch
-  - Coptic: Tesseract (`cop`) route
-  - Armenian: Tesseract (`hye-calfa-n` preferred, fallback `hye`)
-  - Geez: Tesseract fallback chain (`gez` -> `tir` -> `amh`)
+   - Greek: Kraken primary + Kraken fallback models
+   - Latin: Kraken CATMuS-Print Large (2024-01-30, 98.56% accuracy, CER 1.44%) primary + Tesseract fallback
+   - Syriac: Tesseract `syr` baseline with optional Serto/East CER-gated traineddata switch
+   - Coptic: Tesseract (`cop`) route
+   - Armenian: Tesseract (`hye-calfa-n` preferred, fallback `hye`)
+   - Geez: Tesseract fallback chain (`gez` -> `tir` -> `amh`)
 - Handwritten defaults:
-  - Latin: Kraken McCATMuS
-  - Greek: Kraken greek-german serifs model
-  - Syriac: Transkribus workflow bridge message path
+   - Latin: Kraken CATMuS Medieval (8-15th century manuscripts)
+   - Greek: Kraken greek-german serifs model
+   - Syriac: Transkribus workflow bridge message path
 - Printed benchmark runner with CER/WER JSON reports
 - FastAPI backend (`msocr/service/api.py`)
 - Gradio browser demo (`msocr/service/gradio_demo.py`)
@@ -134,14 +134,18 @@ Policy:
 
 ### Kraken
 - Greek printed primary:
-  - `models/kraken/greek-english_porson_sophoclesplaysa05campgoog/...mlmodel`
+   - `models/kraken/greek-english_porson_sophoclesplaysa05campgoog/...mlmodel`
 - Greek fallback:
-  - `models/kraken/greek-german_serifs_sophokle1v3soph/...mlmodel`
-  - `models/kraken/greek-german_serifs_bsb10234118/...mlmodel`
-- Latin printed primary:
-  - `models/kraken/latin_printed_catmus_large.mlmodel`
-- Latin handwritten default:
-  - `models/kraken/latin_handwritten_mccatmus.mlmodel`
+   - `models/kraken/greek-german_serifs_sophokle1v3soph/...mlmodel`
+   - `models/kraken/greek-german_serifs_bsb10234118/...mlmodel`
+- Latin printed primary (CATMuS-Print Large 2024-01-30):
+   - `models/kraken/catmus-print-fondue-large.mlmodel`
+   - DOI: 10.5281/zenodo.10592716
+   - Accuracy: 98.56%, CER: 1.44%
+- Latin handwritten (CATMuS Medieval):
+   - `models/kraken/catmus-medieval-1.5.0.mlmodel`
+   - DOI: 10.5281/zenodo.10066218
+   - Supports: 8-15th century manuscripts
 
 ### Tesseract local traineddata
 - Coptic:

@@ -115,7 +115,7 @@ def main():
 )
 @click.option(
     "--engine",
-    type=click.Choice(["auto", "kraken", "tesseract"], case_sensitive=False),
+    type=click.Choice(["auto", "kraken", "tesseract", "ocrmypdf"], case_sensitive=False),
     default="auto",
     show_default=True,
     help="Printed OCR engine selection",
