@@ -90,42 +90,15 @@ class OCRModel:
             width, height = processed_img.size
             
             if segmentation_type == "baseline":
-                # Baseline segmentation for modern Kraken models (e.g., CATMuS)
-                # For full page images, use middle baseline with safe margins
-                # For single-line images, baseline at 2/3 of height works better
-                if height > 300:  # Assume full page if height > 300px
-                    baseline_y = height // 2
-                    boundary = [
-                        (0, int(height * 0.3)),        # top-left
-                        (width, int(height * 0.3)),    # top-right
-                        (width, int(height * 0.7)),    # bottom-right
-                        (0, int(height * 0.7)),        # bottom-left
-                    ]
-                else:  # Single-line image
-                    baseline_y = int(height * 2 / 3)
-                    boundary = [
-                        (0, int(height * 0.1)),        # top-left
-                        (width, int(height * 0.1)),    # top-right
-                        (width, int(height * 0.9)),    # bottom-right
-                        (0, int(height * 0.9)),        # bottom-left
-                    ]
-                # Create baseline points along the width
-                baseline = [(0, baseline_y), (width, baseline_y)]
-                bounds = Segmentation(
-                    type="baselines",
-                    imagename=str(image_path),
-                    text_direction="horizontal-lr",
-                    script_detection=False,
-                    lines=[BaselineLine(
-                        id="0",
-                        baseline=baseline,
-                        boundary=boundary
-                    )],
-                    regions=None,
-                    line_orders=None,
-                    language=None,
-                )
-            else:  # bbox segmentation
+                # Use proper Kraken baseline segmentation (two-step pipeline)
+                # Step 1: Segment the page into lines using Kraken's blla
+                logger.info("Performing baseline segmentation on page...")
+                bounds = segment(processed_img, device=self.device)
+                
+                # Step 2: Run OCR on segmented lines
+                logger.info("Running OCR recognition on segmented lines...")
+                result = rpred(self.model, processed_img, bounds)
+            else:
                 # Bounding box segmentation for legacy models (e.g., Greek models)
                 # Add small padding to avoid "Line polygon outside of image bounds" error
                 pad = 2
@@ -143,9 +116,8 @@ class OCRModel:
                     line_orders=None,
                     language=None,
                 )
-    
-            # Perform OCR with explicit segmentation bounds.
-            result = rpred(self.model, processed_img, bounds)
+                # Perform OCR with explicit segmentation bounds.
+                result = rpred(self.model, processed_img, bounds)
 
             # Extract prediction
             predictions = []
