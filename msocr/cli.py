@@ -446,7 +446,7 @@ def benchmark_printed(manifest, output, cer_threshold):
 
 
 @main.command(name="api")
-@click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
+@click.option("--host", default="0.0.0.0", show_default=True, help="Bind host")
 @click.option("--port", default=8000, show_default=True, type=int, help="Bind port")
 @click.option("--reload", is_flag=True, help="Enable auto-reload for development")
 def serve_api(host, port, reload):
