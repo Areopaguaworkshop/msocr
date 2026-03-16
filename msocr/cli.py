@@ -470,5 +470,66 @@ def demo_gradio(host, port, share):
     demo.launch(server_name=host, server_port=port, share=share)
 
 
+@main.command(name="payne-smith")
+@click.option(
+    "--config",
+    default="pipeline/payne-smith-sriac-ocr.yaml",
+    show_default=True,
+    help="Path to Payne-Smith pipeline YAML",
+)
+@click.option(
+    "--runpod-config",
+    default="pipeline/payne-smith_syriac_runpod_train.yaml",
+    show_default=True,
+    help="Path to unified RunPod training YAML",
+)
+@click.option(
+    "--phases",
+    default="0,0b,1,2,3,3b,4,5,6,7,8",
+    show_default=True,
+    help="Comma-separated phase list (e.g. 1,2,3,4)",
+)
+@click.option(
+    "--input-pdf",
+    type=click.Path(path_type=Path),
+    help="Input PDF for phase 1 ingestion",
+)
+@click.option(
+    "--workdir",
+    type=click.Path(path_type=Path),
+    default=".",
+    show_default=True,
+    help="Working directory for relative paths",
+)
+@click.option("--execute", is_flag=True, help="Execute actions (default is dry-run)")
+def payne_smith_pipeline(config, runpod_config, phases, input_pdf, workdir, execute):
+    """Run Payne-Smith Syriac OCR pipeline phases 0-8."""
+    from msocr.pipelines.payne_smith import PayneSmithPipeline
+
+    phase_list = [p.strip() for p in phases.split(",") if p.strip()]
+    if "1" in phase_list and not input_pdf:
+        raise click.ClickException("phase 1 requires --input-pdf")
+
+    pipeline = PayneSmithPipeline(
+        config_path=Path(config),
+        runpod_path=Path(runpod_config) if runpod_config else None,
+        workdir=Path(workdir),
+        execute=execute,
+    )
+    results = pipeline.run(phase_list, input_pdf=input_pdf)
+    for res in results:
+        status = "ok" if res.ok else "error"
+        click.echo(f"{res.phase}: {status} | {res.details}")
+
+
+@main.command(name="runpod-train")
+def runpod_train_reference():
+    """Print RunPod training reference (markdown)."""
+    ref_path = Path("pipeline/runpod_train_reference.md")
+    if not ref_path.exists():
+        raise click.ClickException(f"Reference not found: {ref_path}")
+    click.echo(ref_path.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     main()

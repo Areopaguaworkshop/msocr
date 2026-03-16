@@ -186,3 +186,4 @@ msocr/
 
 - `models/` and `output/` are runtime artifact directories and are gitignored.
 - OCRopus/Ocropy fallback is deactivated in the current implementation phase.
+- Default training method for Syriac Payne-Smith pipeline is RunPod (persistent pod), see `pipeline/runpod_train_reference.md`.
