@@ -150,7 +150,7 @@ infrastructure:
         # Network volume creation is dashboard-only.
         # After creation, note the volume ID from the Storage page.
 
-    directory_layout:
+    directory_layout: |
       /workspace/
         dataset/
           vienna/            # Stage 1: Vienna 2024 GT (git cloned)
@@ -622,20 +622,21 @@ stage_2_payne_smith_finetune:
 
     run_on: pod_ssh
 
-    - name: pdf_to_tiff
-      command: |
-        source /workspace/.venv/bin/activate
-        pdftoppm -tiff -r 500 /workspace/input/payne_smith.pdf \
-          /workspace/dataset/raw_pages/page
+    steps:
+      - name: pdf_to_tiff
+        command: |
+          source /workspace/.venv/bin/activate
+          pdftoppm -tiff -r 500 /workspace/input/payne_smith.pdf \
+            /workspace/dataset/raw_pages/page
 
-    - name: tiff_to_png
-      # Explicit -depth 8 prevents silent downconversion of 16-bit TIFFs
-      command: |
-        for f in /workspace/dataset/raw_pages/*.tif; do
-          convert "$f" -depth 8 -compress none "${f%.tif}.png"
-          rm "$f"
-        done
-        echo "Converted: $(ls /workspace/dataset/raw_pages/*.png | wc -l) pages"
+      - name: tiff_to_png
+        # Explicit -depth 8 prevents silent downconversion of 16-bit TIFFs
+        command: |
+          for f in /workspace/dataset/raw_pages/*.tif; do
+            convert "$f" -depth 8 -compress none "${f%.tif}.png"
+            rm "$f"
+          done
+          echo "Converted: $(ls /workspace/dataset/raw_pages/*.png | wc -l) pages"
 
   # ─── Phase 2b: Synthetic Printed-Serto Augmentation ──────────
   phase_2b_synthetic_augmentation:

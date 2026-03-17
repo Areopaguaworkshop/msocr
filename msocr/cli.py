@@ -473,19 +473,19 @@ def demo_gradio(host, port, share):
 @main.command(name="payne-smith")
 @click.option(
     "--config",
-    default="pipeline/payne-smith-sriac-ocr.yaml",
+    default="pipeline/payne-smith_syriac_runpod_train.yaml",
     show_default=True,
     help="Path to Payne-Smith pipeline YAML",
 )
 @click.option(
     "--runpod-config",
-    default="pipeline/payne-smith_syriac_runpod_train.yaml",
+    default="",
     show_default=True,
     help="Path to unified RunPod training YAML",
 )
 @click.option(
     "--phases",
-    default="0,0b,1,2,3,3b,4,5,6,7,8",
+    default="phase_1a_validate_vienna_gt,phase_1b_split_vienna_dataset,phase_1c_pretrain,phase_1d_evaluate_vienna,phase_2a_ingest_pages,phase_2b_synthetic_augmentation,phase_2c_preprocess,phase_2d_segmentation,phase_2e_line_extraction,phase_2f_bootstrap_ocr,phase_2g_manual_correction,phase_2h_dataset_split,phase_2i_finetune_serto,phase_2j_finetune_estrangela,phase_2l_language_correction,stage_3_evaluation",
     show_default=True,
     help="Comma-separated phase list (e.g. 1,2,3,4)",
 )
@@ -503,12 +503,13 @@ def demo_gradio(host, port, share):
 )
 @click.option("--execute", is_flag=True, help="Execute actions (default is dry-run)")
 def payne_smith_pipeline(config, runpod_config, phases, input_pdf, workdir, execute):
-    """Run Payne-Smith Syriac OCR pipeline phases 0-8."""
+    """Run Payne-Smith Syriac OCR training pipeline."""
     from msocr.pipelines.payne_smith import PayneSmithPipeline
 
     phase_list = [p.strip() for p in phases.split(",") if p.strip()]
-    if "1" in phase_list and not input_pdf:
-        raise click.ClickException("phase 1 requires --input-pdf")
+    ingest_aliases = {"1", "phase_2a_ingest_pages"}
+    if any(p in ingest_aliases for p in phase_list) and not input_pdf:
+        click.echo("Note: no --input-pdf provided, phase_2a will use input/payne_smith.pdf if present.")
 
     pipeline = PayneSmithPipeline(
         config_path=Path(config),
