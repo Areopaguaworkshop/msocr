@@ -10,8 +10,19 @@ wheels/
 .venv
 
 # Project runtime artifacts
-models/
 output/
+
+# Large model files
+models/*.mlmodel
+models/kraken/
+models/pretrain/
+models/SyriacLexiconheader/
+models/tesseract/
+
+# Large dataset files
+dataset/synthetic_lines/
+dataset/raw_pages/
+dataset/processed_pages/
 
 # Test folder
 test/

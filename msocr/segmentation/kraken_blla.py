@@ -14,9 +14,16 @@ from PIL import Image
 def segment_pages(input_dir: Path, output_dir: Path, cfg: Dict) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     count = 0
+    model_cfg = cfg.get("model")
+    reading_order = str(cfg.get("reading_order", "rtl")).lower()
+    text_direction = "horizontal-rl" if reading_order == "rtl" else "horizontal-lr"
+
     for image_path in sorted(input_dir.rglob("*.png")):
         with Image.open(image_path) as img:
-            seg = segment(img, model=models.load_any(cfg.get("model", "blla")))
+            if not model_cfg or str(model_cfg).lower() == "blla":
+                seg = segment(img, text_direction=text_direction)
+            else:
+                seg = segment(img, text_direction=text_direction, model=models.load_any(model_cfg))
         seg_json = _serialize_segmentation(seg, str(image_path))
         out_path = output_dir / f"{image_path.stem}.segments.json"
         with out_path.open("w", encoding="utf-8") as f:
