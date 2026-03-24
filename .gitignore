@@ -20,6 +20,7 @@ models/SyriacLexiconheader/
 models/tesseract/
 
 # Large dataset files
+dataset/
 dataset/synthetic_lines/
 dataset/raw_pages/
 dataset/processed_pages/

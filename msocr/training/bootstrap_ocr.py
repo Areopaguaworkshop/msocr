@@ -32,8 +32,11 @@ def bootstrap_ocr_lines(
     count = 0
     method = cfg.get("confidence_aggregation", "mean")
     threshold = float(cfg.get("confidence_threshold", 0.8))
+    segmentation_type = cfg.get("segmentation_type", "bbox")
+
     for image_path in sorted(lines_dir.glob("*.png")):
-        result = model.predict_line(image_path)
+        # Line crops are already segmented; bbox avoids expensive re-segmentation.
+        result = model.predict_line(image_path, segmentation_type=segmentation_type)
         preds = result.get("predictions", [])
         confs = [p.get("confidence", 0.0) for p in preds]
         agg = _aggregate(confs, method)
