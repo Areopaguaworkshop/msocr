@@ -9,56 +9,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from msocr.data.session_manager import (
     ExportFormat,
     IngestionPath,
-    LANGUAGE_REGISTRY as SESSION_LANGUAGE_REGISTRY,
+    LANGUAGE_REGISTRY,
     SessionManager,
 )
-
-
-# Language registry for API - includes direction and web font specs
-LANGUAGE_REGISTRY: Dict[str, Dict[str, str]] = {
-    "syriac": {
-        "direction": "rtl",
-        "web_font": "Noto Sans Syriac",
-    },
-    "sogdian": {
-        "direction": "rtl",
-        "web_font": "Noto Sans Sogdian",
-    },
-    "old_sogdian": {
-        "direction": "rtl",
-        "web_font": "Noto Sans Old Sogdian",
-    },
-    "old_turkish": {
-        "direction": "rtl",
-        "web_font": "Noto Sans Old Turkic",
-    },
-    "greek": {
-        "direction": "ltr",
-        "web_font": "GFS Didot, Noto Serif",
-    },
-    "latin": {
-        "direction": "ltr",
-        "web_font": "Junicode, EB Garamond",
-    },
-    "coptic": {
-        "direction": "ltr",
-        "web_font": "Noto Sans Coptic, Antinoou",
-    },
-    "armenian": {
-        "direction": "ltr",
-        "web_font": "Noto Sans Armenian",
-    },
-    "geez": {
-        "direction": "ltr",
-        "web_font": "Noto Sans Ethiopic",
-    },
-}
 
 
 # Pydantic request models

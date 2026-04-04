@@ -415,3 +415,75 @@ class TestSessionManager:
 
         # When using pageseg fallback, should set manual review flag
         assert session.needs_manual_review is True
+
+    def test_save_page_image_from_local_file(self, session_manager, temp_sessions_dir):
+        """Test saving page image from local file to session directory."""
+        # Create a test image file
+        test_image = temp_sessions_dir / "source_image.tif"
+        test_image.write_bytes(b"fake_tiff_content_for_testing")
+
+        session = session_manager.create_session(
+            language="syriac",
+            script_variant="estrangela",
+            ingestion_path=IngestionPath.LOCAL_FILE,
+            source=str(test_image),
+            lines=[],
+            segmentation_engine=SegmentationEngine.BLLA,
+        )
+
+        # Save page image from local file
+        result = session_manager.save_page_image(
+            session.session_id,
+            image_source=test_image,
+        )
+
+        assert result is not None
+        assert result.exists()
+        assert result.name == "page.tif"
+        assert result.read_bytes() == b"fake_tiff_content_for_testing"
+
+    def test_save_page_image_from_browser_upload(self, session_manager, temp_sessions_dir):
+        """Test saving page image from browser upload bytes."""
+        session = session_manager.create_session(
+            language="greek",
+            script_variant="polytonic",
+            ingestion_path=IngestionPath.BROWSER_UPLOAD,
+            source="browser_upload.jpg",
+            lines=[],
+            segmentation_engine=SegmentationEngine.BLLA,
+        )
+
+        # Save page image from browser upload bytes
+        test_bytes = b"fake_jpeg_content_from_browser"
+        result = session_manager.save_page_image(
+            session.session_id,
+            image_bytes=test_bytes,
+        )
+
+        assert result is not None
+        assert result.exists()
+        assert result.name == "page.tif"
+        assert result.read_bytes() == test_bytes
+
+    def test_page_image_persistence_directory_structure(self, session_manager, temp_sessions_dir):
+        """Test that page.tif is created in correct session directory."""
+        session = session_manager.create_session(
+            language="sogdian",
+            script_variant="formal",
+            ingestion_path=IngestionPath.LOCAL_FILE,
+            source="source.tif",
+            lines=[],
+            segmentation_engine=SegmentationEngine.BLLA,
+        )
+
+        # Create and save page image
+        test_image = temp_sessions_dir / "test_source.tif"
+        test_image.write_bytes(b"image_data")
+        page_path = session_manager.save_page_image(session.session_id, image_source=test_image)
+
+        # Verify directory structure
+        session_dir = temp_sessions_dir / session.session_id
+        assert session_dir.exists()
+        assert (session_dir / "session.json").exists()
+        assert (session_dir / "page.tif").exists()
+        assert (session_dir / "crops").exists()

@@ -1,0 +1,148 @@
+schema_version: msocr.docspec.v1
+id: pipeline.harness.htr_generic_train
+title: Generic HTR Training Pipeline
+purpose: |
+  Shared HTR training pipeline parameterized by language for manuscript OCR.
+  Uses PAGE/ALTO XML exports from Transkribus or eScriptorium as input.
+  Supports custom Kraken HTR model training for languages without strong public models.
+  Per Section 7 of Summary-harness-update.md: Transkribus bootstrap, custom Kraken target.
+scope:
+  project: msocr
+  languages:
+    - name: syriac
+      status: implementation_priority_1
+    - name: coptic
+      status: planned
+    - name: armenian
+      status: planned
+    - name: geez
+      status: planned
+    - name: sogdian
+      status: planned
+    - name: old_turkish
+      status: planned
+  writing_modes:
+    - handwritten
+inputs:
+  required:
+    - target_language
+    - writing_mode
+    - split_manifest_id
+    - model_config_id
+  optional:
+    - desired_accuracy
+    - gpu_tier
+    - corpus_size
+workflow:
+  - step_id: TRG1
+    name: trigger
+    action: |
+      Git push to data/{language}/** or manual dispatch with language parameter.
+      Triggers HTR training for specified language from manuscript corpus.
+  - step_id: VAL1
+    name: validate
+    action: |
+      Validate PAGE/ALTO XML exports from Transkribus/eScriptorium.
+      Check: line count >= 500 for training, XML schema valid.
+      Confirm frozen manifest exists in data/manifests/.
+      Verify baseline model availability for language.
+  - step_id: BLD1
+    name: build_training_image
+    action: |
+      Docker image: ubuntu:22.04 + Kraken (ketos) + Python dependencies.
+      Include baseline model if available, otherwise train from scratch.
+      Push to HAR Docker registry.
+  - step_id: RNP1
+    name: runpod_submit
+    action: |
+      POST to RunPod API with image ref.
+      GPU tier selection:
+      - RTX 3090/4090: corpus < 5,000 lines
+      - A100 40GB: corpus > 20,000 lines
+      Poll job status or receive webhook callback on completion.
+  - step_id: EVAL1
+    name: evaluate
+    action: |
+      Run evaluation on frozen benchmark manifest.
+      Compute CER, WER on held-out test set.
+      Write metrics.json with: CER, WER, language, model_version,
+      pipeline_run_id, manifest_id, corpus_size, gpu_tier_used.
+  - step_id: GT1
+    name: policy_gate
+    action: |
+      Read metrics.json. Apply CER threshold: <= 10% for all languages.
+      PASS: continue to register step.
+      FAIL: emit needs_manual_review: true, block deployment, notify team.
+  - step_id: REG1
+    name: register_artifact
+    action: |
+      Push trained HTR model to HAR as generic artifact.
+      Artifact name pattern: htr-{language}-v{sequenceId}.
+      Attach metrics.json as artifact sidecar.
+      Tag: staging (automatic), production (manual approval gate).
+  - step_id: DEP1
+    name: deploy
+    action: |
+      Harness CD pulls model from HAR on FastAPI service startup.
+      Update model registry with new language model.
+      Gradio demo updated to include new language option.
+metrics:
+  primary:
+    - CER
+  secondary:
+    - WER
+thresholds:
+  handwritten:
+    cer_max: 0.10
+  rule: |
+    CER <= 10% is the starting gate for all languages.
+    Manual review required if gate fails or confidence is unstable.
+    Language-specific thresholds may be added after baseline established.
+fallback:
+  failed_or_unstable:
+    - collect_additional_ground_truth_lines
+    - retrain_with_adjusted_hyperparameters
+    - try_alternative_baseline_model
+    - set_needs_manual_review_true
+outputs:
+  artifacts:
+    - trained_htr_model
+    - metrics.json
+    - config.yaml
+    - Dockerfile.sha
+    - review_flag
+integration:
+  implemented_modules:
+    - msocr/cli.py
+    - msocr/data/manager.py
+    - msocr/pipeline/runpod_client.py
+    - msocr/pipeline/har_client.py
+    - msocr/evaluation/metrics.py
+    - msocr/data/manifest.py
+    - msocr/preprocessing/pipeline.py
+    - msocr/training/ketos_trainer.py
+  planned_modules:
+    - annotation_api
+    - session_manager
+    - external_connector_transkribus
+    - external_connector_escriptorium
+tooling:
+  package_manager: uv
+  runtime_execution: uv run
+  code_location_policy: all_new_code_under_msocr
+  gpu_tiers:
+    - RTX 3090 (24 GB)
+    - RTX 4090 (24 GB)
+    - A100 40GB (40 GB)
+  gpu_tier_selection:
+    small_corpus: RTX 3090/4090 (lines < 5000)
+    large_corpus: A100 40GB (lines > 20000)
+  baseline_model: Custom Kraken HTR or Transkribus export
+  input_format: PAGE XML, ALTO XML
+status:
+  maturity: active_blueprint
+  implementation_state: implementation_in_progress
+owners:
+  - role: htr_generic
+    team: msocr
+last_updated: 2026-04-04

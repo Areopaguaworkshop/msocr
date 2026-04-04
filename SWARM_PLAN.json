@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0.0",
+  "title": "Task 2.2 - Create Annotation API",
+  "swarm": "2.2",
+  "current_phase": 1,
+  "phases": [
+    {
+      "id": 1,
+      "name": "Implementation",
+      "status": "pending",
+      "tasks": [
+        {
+          "id": "2.2.1",
+          "phase": 1,
+          "status": "pending",
+          "size": "medium",
+          "description": "Create annotation_api.py",
+          "depends": [],
+          "files_touched": []
+        }
+      ]
+    }
+  ],
+  "migration_status": "native"
+}

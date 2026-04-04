@@ -1,115 +1,226 @@
 schema_version: msocr.docspec.v1
-id: output.state_update
-title: Documentation State Update
-purpose: Track completion status for blueprint deliverables and implementation phase alignment.
+id: state_update.current
+title: msocr Current Implementation State Update
+purpose: Track implementation status and align documentation with code reality.
 scope:
     project: msocr
     languages:
-        - name: sogdian
-          status: fully_specified_docs
-        - name: old_turkish
-          status: partially_specified_docs
         - name: greek
-          status: planned_docs
+          status: printed_implemented
         - name: latin
-          status: planned_docs
+          status: printed_implemented
         - name: syriac
-          status: planned_docs
+          status: printed_baseline
         - name: coptic
-          status: planned_docs
+          status: printed_implemented
+        - name: armenian
+          status: printed_implemented
+        - name: geez
+          status: printed_implemented
+        - name: sogdian
+          status: config_exists
+        - name: old_turkish
+          status: config_exists
     writing_modes:
         - printed
         - handwritten
-inputs:
-    required:
-        - deliverable_list
-        - completion_status
-    optional:
-        - blockers
-workflow:
-    - step_id: U1
-      name: enumerate_deliverables
-      action: Verify required markdown and YAML outputs exist.
-    - step_id: U2
-      name: verify_schema_consistency
-      action: Confirm all YAML files follow standardized schema keys.
-    - step_id: U3
-      name: publish_state
-      action: Record completion and open risks.
+documentation:
+    instruction_files:
+        - file: instruction/summary.md
+          status: implemented
+          description: Main summary document with implementation policy and language registry
+        - file: instruction/Start-here.md
+          status: implemented
+          description: Project baseline with current status and next steps
+        - file: instruction/Summary-harness-update.md
+          status: implemented
+          description: Authoritative baseline with detailed pipeline and integration specs
+        - file: instruction/agent.patristic.ocr.model.md
+          status: implemented
+          description: Agent specification for patristic OCR model
+        - file: instruction/eval.md
+          status: implemented
+          description: Evaluation policy and benchmark requirements
+        - file: instruction/code_review.md
+          status: implemented
+          description: Code review guidelines and process
+    skill_yaml:
+        - file: skill/engine_router.yaml
+          status: implemented
+          description: Language-aware OCR/HTR engine router
+        - file: skill/script_mode_classifier.yaml
+          status: implemented
+          description: Script and mode classification skill
+        - file: skill/training_model_skill.yaml
+          status: implemented
+          description: Model training orchestration skill
+        - file: skill/post_ocr_correction.yaml
+          status: implemented
+          description: Post-OCR correction and lexicon validation
+        - file: skill/manual_review_gate.yaml
+          status: implemented
+          description: Manual review gate for low-confidence outputs
+        - file: skill/sogdian_config.yaml
+          status: implemented
+          description: Sogdian-specific configuration skill
+        - file: skill/old_turkish_config.yaml
+          status: implemented
+          description: Old Turkish-specific configuration skill
+    pipeline_yaml:
+        - file: pipeline/base_msocr_compatible.yaml
+          status: implemented
+          description: Base pipeline configuration compatible with msocr
+        - file: pipeline/printed_ocr_training.yaml
+          status: implemented
+          description: Printed OCR training pipeline
+        - file: pipeline/handwritten_htr_training.yaml
+          status: implemented
+          description: Handwritten HTR training pipeline
+        - file: pipeline/benchmark_evaluation.yaml
+          status: implemented
+          description: Benchmark evaluation pipeline with CER/WER metrics
+        - file: pipeline/low_confidence_fallback.yaml
+          status: implemented
+          description: Fallback pipeline for low-confidence scenarios
+        - file: pipeline/payne-smith_syriac_runpod_train.yaml
+          status: implemented
+          description: Syriac-specific training pipeline for Payne-Smith manuscript
+    source_registry:
+        - file: source_registry/patristic_sources.yaml
+          status: implemented
+          description: Source registry for models, lexicons, and integrations
+code_implementation:
+    implemented_modules:
+        - module: msocr/cli.py
+          description: CLI orchestration with subcommands (ocr, htr, train, preprocess)
+        - module: msocr/data/manager.py
+          description: Dataset metadata and storage management
+        - module: msocr/data/annotation.py
+          description: Annotation bridge for Label Studio, CVAT, ALTO, PAGE
+        - module: msocr/preprocessing/pipeline.py
+          description: Image preprocessing pipeline
+        - module: msocr/models/inference.py
+          description: Kraken inference wrapper
+        - module: msocr/training/ketos_trainer.py
+          description: Kraken ketos training wrapper
+        - module: msocr/service/api.py
+          description: FastAPI backend service
+        - module: msocr/service/gradio_demo.py
+          description: Gradio browser demo layer
+        - module: configs/sogdian_config.yaml
+          description: Sogdian Kraken training configuration (LTR)
+        - module: configs/old_turkish_config.yaml
+          description: Old Turkish Kraken training configuration (RTL)
+    planned_modules:
+        - module: msocr/service/annotation_api.py
+          description: Annotation API for ground-truth collection
+          status: planned
+        - module: msocr/data/session_manager.py
+          description: Annotation session store
+          status: planned
+        - module: msocr/data/manifest.py
+          description: Frozen manifest manager with DVC tracking
+          status: planned
+        - module: msocr/evaluation/metrics.py
+          description: CER/WER evaluation runner
+          status: planned
+        - module: msocr/pipeline/runpod_client.py
+          description: RunPod job client for GPU training
+          status: planned
+        - module: msocr/pipeline/har_client.py
+          description: Harness Artifact Registry client
+          status: planned
+        - module: msocr/models/router.py
+          description: Language router for OCR/HTR engine selection
+          status: planned
+language_status:
+    greek:
+        printed: implemented
+        handwritten: planned
+        notes: Kraken primary with fallback models; CATMuS-compatible
+    latin:
+        printed: implemented
+        handwritten: planned
+        notes: Kraken CATMuS-Print Large with Tesseract fallback
+    syriac:
+        printed: baseline
+        handwritten: planned
+        notes: Tesseract syr baseline; Transkribus bridge for HTR bootstrap
+    coptic:
+        printed: implemented
+        handwritten: planned
+        notes: Tesseract cop route; custom Kraken HTR expected
+    armenian:
+        printed: implemented
+        handwritten: planned
+        notes: Tesseract hye-calfa-n preferred; eScriptorium/Transkribus for HTR
+    geez:
+        printed: implemented
+        handwritten: planned
+        notes: Tesseract gez; same preparation as Armenian HTR
+    sogdian:
+        printed: config_exists
+        handwritten: config_exists
+        notes: Custom Kraken training required; no public baseline
+    old_turkish:
+        printed: config_exists
+        handwritten: config_exists
+        notes: Existing configs/sogdian_config.yaml and configs/old_turkish_config.yaml
+pipeline_targets:
+    syriac_printed:
+        status: pipeline_definition_ready
+        file: pipeline/payne-smith_syriac_runpod_train.yaml
+        notes: Syriac printed OCR pipeline defined; awaiting benchmark validation
+    greek_printed:
+        status: implemented_runtime
+        notes: Greek printed OCR routing implemented in runtime
+    latin_printed:
+        status: implemented_runtime
+        notes: Latin printed OCR routing implemented in runtime
+next_steps:
+    - Complete benchmark validation on real datasets (CER/WER) for implemented printed routes
+; target: printed CER <= 5%
+    - Finish Syriac handwritten production path via Transkribus bridge
+    - Finish Coptic handwritten production path via Transkribus workflow
+    - Implement Armenian handwritten HTR path
+    - Implement Geez handwritten HTR path
+    - Align and test Sogdian and Old Turkish handwritten pipeline under benchmark standard
+    - Separate printed OCR and handwritten HTR routes in all new modules and tests
 metrics:
     primary:
-        - deliverable_completion_ratio
+        - implementation_coverage
+        - documentation_sync_rate
     secondary:
-        - schema_consistency_ratio
+        - code_to_doc_alignment
 thresholds:
-    completion:
-        min_deliverable_completion_ratio: 1.0
-        min_schema_consistency_ratio: 1.0
-    rule: Any missing required output keeps state as partial.
+    documentation:
+        min_deliverables_complete: 1.0
+    implementation:
+        min_code_path_coverage: 0.8
+    rule: All planned items must have clear implementation timeline
 fallback:
-    incomplete_state:
-        - list_missing_items
-        - keep_status_in_progress
+    missing_implementation:
+        - mark_as_blocked
+        - escalate_to_next_phase
 outputs:
     artifacts:
-        - completion_table
-        - open_risks
-        - next_actions
+        - state_update_table
+        - progress_dashboard
 integration:
-    implemented_modules:
+    existing_modules:
         - msocr/cli.py
         - msocr/data/manager.py
-    planned_modules:
-        - automated_doc_validator
+        - msocr/data/annotation.py
+        - msocr/preprocessing/pipeline.py
+        - msocr/models/inference.py
+        - msocr/training/ketos_trainer.py
+        - msocr/service/api.py
+        - msocr/service/gradio_demo.py
 status:
-    maturity: active
-    implementation_state: docs_aligned_for_code_phase
+    maturity: active_development
+    implementation_state: partial_implementation
+    last_validation: 2026-04-04
 owners:
-    - role: documentation_governance
+    - role: implementation_governance
       team: msocr
-last_updated: 2026-02-12
-completion_table:
-    - item: instruction/summary.md
-      status: completed
-      note: Fully rewritten baseline.
-    - item: instruction/agent.patristic.ocr.model.md
-      status: completed
-      note: Added architecture and route contracts.
-    - item: instruction/eval.md
-      status: completed
-      note: Added CER/WER benchmark standard and split policy.
-    - item: instruction/code_review.md
-      status: completed
-      note: Added template checklist for training/evaluation review.
-    - item: skill/*.yaml
-      status: completed
-      note: Standardized schema applied.
-    - item: pipeline/*.yaml
-      status: completed
-      note: Printed and handwritten routes separated.
-    - item: source_registry/patristic_sources.yaml
-      status: completed
-      note: Implemented/planned/external sources registered.
-    - item: output/state_update.yaml
-      status: completed
-      note: This state record.
-    - item: msocr/service/api.py
-      status: completed
-      note: FastAPI backend service module added.
-    - item: msocr/service/gradio_demo.py
-      status: completed
-      note: Gradio demo service module added.
-open_risks:
-    - Planned modules are not yet implemented in code.
-    - Handwritten models for Syriac and Coptic require custom training data.
-    - Threshold targets may require dataset-specific recalibration.
-next_actions:
-    - Complete benchmark validation on real manuscript datasets for printed routes.
-    - Implement Syriac/Coptic/Armenian/Geez handwritten production workflows.
-    - Use uv-managed commands for environment and execution workflows.
-    - Keep docs and YAML specs synchronized with each implementation milestone.
-repo_policy:
-    gitignore_runtime_artifacts:
-        - models/
-        - output/
-    note: Runtime models and generated outputs are excluded from version control.
+last_updated: 2026-04-04

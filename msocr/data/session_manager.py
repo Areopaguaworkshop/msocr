@@ -213,6 +213,10 @@ class SessionManager:
         """Get the annotations.json path."""
         return self._get_session_dir(session_id) / "annotations.json"
 
+    def _get_page_image_path(self, session_id: str) -> Path:
+        """Get the page.tif path."""
+        return self._get_session_dir(session_id) / "page.tif"
+
     def create_session(
         self,
         language: str,
@@ -556,3 +560,44 @@ class SessionManager:
         shutil.rmtree(session_dir)
         logger.info(f"Deleted session {session_id}")
         return True
+
+    def save_page_image(
+        self, 
+        session_id: str, 
+        image_source: Optional[Path] = None,
+        image_bytes: Optional[bytes] = None,
+    ) -> Optional[Path]:
+        """Save page image to session directory.
+        
+        Supports three ingestion paths:
+        - LOCAL_FILE: image_source is a local file path to copy from
+        - BROWSER_UPLOAD: image_bytes contains the uploaded image data
+        - IIIF_MANIFEST: image_url would be fetched and downloaded (requires requests)
+        
+        Args:
+            session_id: The session ID
+            image_source: Path to source image file (for LOCAL_FILE ingestion)
+            image_bytes: Raw image bytes (for BROWSER_UPLOAD ingestion)
+        
+        Returns:
+            Path to saved page.tif, or None if failed
+        """
+        page_path = self._get_page_image_path(session_id)
+        
+        # Handle browser upload (image_bytes provided)
+        if image_bytes is not None:
+            page_path.write_bytes(image_bytes)
+            logger.info(f"Saved page image from browser upload to {page_path}")
+            return page_path
+        
+        # Handle local file (copy from source)
+        if image_source is not None:
+            if not image_source.exists():
+                logger.error(f"Source image not found: {image_source}")
+                return None
+            shutil.copy2(image_source, page_path)
+            logger.info(f"Copied page image from {image_source} to {page_path}")
+            return page_path
+        
+        logger.warning(f"No image source provided for session {session_id}")
+        return None
