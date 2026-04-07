@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from msocr.language_registry import normalize_language_code
 from msocr.models.inference import predict
 from msocr.pipelines.printed_ocr import run_printed_ocr
 
@@ -20,8 +21,9 @@ def run_printed_service(
     cer_threshold: float = 0.05,
     device: str = "cpu",
 ) -> Dict[str, Any]:
+    lang_key = normalize_language_code(lang)
     result = run_printed_ocr(
-        lang=lang.strip().lower(),
+        lang=lang_key,
         image_path=image_path,
         model=model,
         device=device,
@@ -34,7 +36,7 @@ def run_printed_service(
         "text": result["text"],
         "engine": result["engine"],
         "mode": "ocr",
-        "language": lang.strip().lower(),
+        "language": lang_key,
     }
 
 
@@ -46,7 +48,7 @@ def run_htr_service(
     provider: str = "auto",
     device: str = "cpu",
 ) -> Dict[str, Any]:
-    lang_key = lang.strip().lower()
+    lang_key = normalize_language_code(lang)
     provider_key = provider.strip().lower()
 
     if lang_key == "syriac" and provider_key in ("auto", "transkribus"):

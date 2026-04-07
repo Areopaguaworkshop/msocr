@@ -18,6 +18,7 @@ from msocr.data.session_manager import (
     LANGUAGE_REGISTRY,
     SessionManager,
 )
+from msocr.language_registry import is_supported_language, normalize_language_code
 
 
 # Pydantic request models
@@ -101,11 +102,12 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
             HTTPException: If language is not supported
         """
         # Validate language
-        if request.language not in LANGUAGE_REGISTRY:
+        if not is_supported_language(request.language):
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported language: {request.language}. Supported: {list(LANGUAGE_REGISTRY.keys())}",
             )
+        language = normalize_language_code(request.language)
 
         # Parse ingestion path
         try:
@@ -115,14 +117,14 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
 
         # Create session via manager
         session = manager.create_session(
-            language=request.language,
+            language=language,
             script_variant=request.script_variant,
             ingestion_path=ingestion,
             source=request.source,
         )
 
         # Get language metadata
-        lang_info = LANGUAGE_REGISTRY[request.language]
+        lang_info = LANGUAGE_REGISTRY[language]
 
         return {
             "session_id": session.session_id,

@@ -9,9 +9,10 @@ from typing import Optional
 import gradio as gr
 from PIL import Image
 
+from msocr.language_registry import DEMO_LANGUAGE_CODES
 from msocr.service.runtime import run_htr_service, run_printed_service
 
-LANGUAGES = ["greek", "latin", "syriac", "coptic", "armenia", "geez"]
+LANGUAGES = list(DEMO_LANGUAGE_CODES)
 
 
 def _save_temp_image(image: Image.Image) -> Path:

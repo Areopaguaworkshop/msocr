@@ -16,6 +16,7 @@ from typing import Optional, TypedDict
 
 from click import ClickException
 
+from msocr.language_registry import normalize_language_code
 from msocr.models.inference import predict
 
 
@@ -193,7 +194,10 @@ def run_printed_ocr(
     reference_text_path: Optional[str] = None,
     cer_threshold: float = 0.05,
 ) -> PrintedOCRResult:
-    lang_key = lang.lower()
+    try:
+        lang_key = normalize_language_code(lang)
+    except KeyError:
+        lang_key = lang.lower()
     engine_key = engine.lower()
     variant_key = variant.lower()
 
@@ -312,7 +316,7 @@ def run_printed_ocr(
 
         return {"text": text, "engine": "tesseract", "language": lang_key}
 
-    if lang_key == "armenia":
+    if lang_key == "armenian":
         if engine_key in ("auto", "tesseract"):
             # Prefer local hye-calfa-n model, fallback to system hye.
             if ARMENIAN_LOCAL_MODEL.exists():

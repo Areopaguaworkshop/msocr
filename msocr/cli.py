@@ -7,10 +7,15 @@ from typing import Dict, List
 import click
 import yaml
 
+from msocr.language_registry import (
+    CLI_LANGUAGE_ALIASES,
+    CLI_LANGUAGE_CODES,
+    normalize_language_code,
+)
 from msocr.training.ketos_trainer import KetosTrainer
 
 LANG_CHOICES = click.Choice(
-    ["greek", "latin", "syriac", "coptic", "armenia", "geez", "sogdian", "old_turkish"],
+    [*CLI_LANGUAGE_CODES, *CLI_LANGUAGE_ALIASES],
     case_sensitive=False,
 )
 MODE_CHOICES = click.Choice(["ocr", "htr"], case_sensitive=False)
@@ -34,7 +39,10 @@ DEFAULT_CONFIGS: Dict[str, Dict[str, str]] = {
 
 
 def _normalize_lang(lang: str) -> str:
-    return lang.strip().lower()
+    try:
+        return normalize_language_code(lang)
+    except KeyError:
+        return lang.strip().lower()
 
 
 def _resolve_default_config(lang: str, mode: str) -> Path:

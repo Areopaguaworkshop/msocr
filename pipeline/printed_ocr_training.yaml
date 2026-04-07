@@ -16,7 +16,7 @@ scope:
           status: planned
         - name: coptic
           status: planned
-        - name: armenia
+        - name: armenian
           status: planned
         - name: geez
           status: planned

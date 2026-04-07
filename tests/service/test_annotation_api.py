@@ -209,3 +209,24 @@ def test_rtl_language_metadata(tmp_path: Path):
     data = response.json()
     assert data["direction"] == "rtl"
     assert data["web_font"] is not None  # Noto Sans Syriac expected
+
+
+def test_legacy_armenia_alias_is_normalized(tmp_path: Path):
+    """Test that the legacy CLI/API typo still resolves to the canonical language."""
+    from msocr.service.annotation_api import create_app
+
+    app = create_app(base_dir=tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/sessions",
+        json={
+            "language": "armenia",
+            "script_variant": "bolorgir",
+            "ingestion_path": "browser_upload",
+            "source": "test.tif",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["language"] == "armenian"

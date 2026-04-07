@@ -14,12 +14,14 @@ import json
 import uuid
 import shutil
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from enum import Enum
 import logging
+
+from msocr.language_registry import LANGUAGE_REGISTRY, normalize_language_code
 
 logger = logging.getLogger(__name__)
 
@@ -43,57 +45,6 @@ class SegmentationEngine(Enum):
     BLLA = "blla"          # Kraken baseline segmenter (primary)
     PAGESEG = "pageseg"    # Legacy bounding-box segmenter (fallback)
     MANUAL = "manual"       # Manual correction (always available)
-
-
-# Language registry for web font specs and RTL handling
-LANGUAGE_REGISTRY = {
-    "syriac": {
-        "direction": "rtl",
-        "font": "Noto Sans Syriac",
-        "iso": "syr",
-    },
-    "sogdian": {
-        "direction": "rtl",
-        "font": "Noto Sans Sogdian",
-        "iso": "sog",
-    },
-    "old_sogdian": {
-        "direction": "rtl",
-        "font": "Noto Sans Old Sogdian",
-        "iso": "sog",
-    },
-    "old_turkish": {
-        "direction": "rtl",
-        "font": "Noto Sans Old Turkic",
-        "iso": "otk",
-    },
-    "greek": {
-        "direction": "ltr",
-        "font": "GFS Didot, Noto Serif",
-        "iso": "grc",
-    },
-    "latin": {
-        "direction": "ltr",
-        "font": "Junicode, EB Garamond",
-        "iso": "lat",
-    },
-    "coptic": {
-        "direction": "ltr",
-        "font": "Noto Sans Coptic, Antinoou",
-        "iso": "cop",
-    },
-    "armenian": {
-        "direction": "ltr",
-        "font": "Noto Sans Armenian",
-        "iso": "hye",
-    },
-    "geez": {
-        "direction": "ltr",
-        "font": "Noto Sans Ethiopic",
-        "iso": "gez",
-    },
-}
-
 
 @dataclass
 class LineSegment:
@@ -153,7 +104,7 @@ class AnnotationSession:
     def get_web_font_spec(self) -> str:
         """Get web font specification for this language."""
         lang_info = LANGUAGE_REGISTRY.get(self.language, {})
-        return lang_info.get("font", "system-ui")
+        return lang_info.get("web_font", "system-ui")
 
     def get_language_iso(self) -> str:
         """Get ISO 639 code for this language."""
@@ -239,6 +190,7 @@ class SessionManager:
         Returns:
             Created AnnotationSession
         """
+        language = normalize_language_code(language)
         session_id = str(uuid.uuid4())[:8]
         
         # Set manual review flag for fallback segmentation
