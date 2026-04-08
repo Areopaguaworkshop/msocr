@@ -464,6 +464,26 @@ def serve_api(host, port, reload):
     uvicorn.run("msocr.service.api:app", host=host, port=port, reload=reload)
 
 
+@main.command(name="annotation-api")
+@click.option("--host", default="0.0.0.0", show_default=True, help="Bind host")
+@click.option("--port", default=8001, show_default=True, type=int, help="Bind port")
+@click.option(
+    "--base-dir",
+    type=click.Path(path_type=Path),
+    default=Path("msocr/data"),
+    show_default=True,
+    help="Base directory for persisted annotation sessions",
+)
+def serve_annotation_api(host, port, base_dir):
+    """Run the dedicated annotation FastAPI service."""
+    import uvicorn
+
+    from msocr.service.annotation_api import create_app
+
+    app = create_app(base_dir=base_dir)
+    uvicorn.run(app, host=host, port=port)
+
+
 @main.command(name="demo")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
 @click.option("--port", default=7860, show_default=True, type=int, help="Bind port")

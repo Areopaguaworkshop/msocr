@@ -1,6 +1,6 @@
 plan_id: harness_os_upgrade
-updated_at: 2026-04-07
-current_phase: step_1_platform_contract_normalization
+updated_at: 2026-04-08
+current_phase: step_2_annotation_vertical_slice
 status: in_progress
 
 completed:
@@ -10,20 +10,25 @@ completed:
   - removed the duplicated annotation-only language registry from msocr/data/session_manager.py
   - aligned pipeline/printed_ocr_training.yaml with the canonical armenian language code
   - fixed the annotation API contract so session creation and /api/languages return web_font consistently
+  - implemented session hydration from local files, browser uploads, and IIIF manifests in msocr/data/session_manager.py
+  - added automatic annotation-session page materialization, segmentation fallback, and crop generation
+  - expanded annotation API responses with segmentation_engine, page_count, line_count, needs_manual_review, and lines
+  - added a dedicated annotation-api CLI command instead of mounting the annotation app under the main OCR API
 
 decisions:
-  - annotation_api remains a dedicated FastAPI app module for now; merging it into msocr/service/api.py is deferred to step_2_annotation_vertical_slice
+  - annotation_api remains a dedicated FastAPI app module served by the new msocr annotation-api command; merging into msocr/service/api.py is deferred
   - the legacy alias armenia remains accepted for compatibility, but all stored and returned language values are canonicalized to armenian
 
 verification:
   - command: uv run pytest tests/data/test_session_manager.py tests/service/test_annotation_api.py -q
     result: pass
-    notes: 29 passed
+    notes: pending rerun after step 2 changes
   - command: uv run pytest -q
     result: pass
-    notes: 29 passed
+    notes: pending rerun after step 2 changes
   - command: uv run python -m compileall msocr
     result: pass
+    notes: pending rerun after step 2 changes
 
 changed_files:
   - msocr/language_registry.py
@@ -35,18 +40,18 @@ changed_files:
   - msocr/service/annotation_api.py
   - msocr/data/session_manager.py
   - pipeline/printed_ocr_training.yaml
+  - msocr/cli.py
   - tests/service/test_annotation_api.py
 
 remaining_for_step_2:
-  - wire real image ingestion into annotation sessions for browser upload, local file, and IIIF sources
-  - connect session creation to automatic segmentation using kraken blla with fallback behavior
-  - generate and persist cropped line images during annotation session setup
-  - decide whether annotation service gets its own CLI command or is mounted under the main FastAPI app
-  - expand annotation API responses to include page_count, line_count, segmentation_engine, and lines as described in the Harness update doc
+  - add higher-fidelity segmentation review tools beyond current fallback-generated crops
+  - support multi-page session workflows instead of first-page normalization only
+  - decide whether the main OCR FastAPI app should proxy or mount annotation routes
 
 known_risks:
   - the shared registry now unifies language metadata, but route selection is still hardcoded in msocr/pipelines/printed_ocr.py and msocr/service/runtime.py
   - Harness/RunPod orchestration modules described in docs do not exist yet; this step only normalized the local contract layer
-  - annotation API persistence/export works, but automatic segmentation and crop generation are still incomplete
+  - annotation API now hydrates sessions, but segmentation quality still depends entirely on Kraken fallback behavior and lacks manual redraw/edit endpoints
+  - IIIF support currently resolves the first canvas image only
 
-next_recommended_action: step_2_annotation_vertical_slice
+next_recommended_action: step_3_reproducible_manifests_and_benchmark_contract

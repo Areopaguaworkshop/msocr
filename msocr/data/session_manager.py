@@ -11,17 +11,24 @@ Session structure:
 """
 
 import json
+import mimetypes
+import tempfile
 import uuid
 import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
+from urllib.request import urlopen
 import logging
 
+from PIL import Image
+
 from msocr.language_registry import LANGUAGE_REGISTRY, normalize_language_code
+from msocr.utils.input_loader import expand_input_to_images
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +52,7 @@ class SegmentationEngine(Enum):
     BLLA = "blla"          # Kraken baseline segmenter (primary)
     PAGESEG = "pageseg"    # Legacy bounding-box segmenter (fallback)
     MANUAL = "manual"       # Manual correction (always available)
+
 
 @dataclass
 class LineSegment:
@@ -91,6 +99,7 @@ class AnnotationSession:
     annotations: Dict[str, Dict] = field(default_factory=dict)
     ingestion_path: IngestionPath = IngestionPath.LOCAL_FILE
     source: str = ""
+    page_count: int = 1
     needs_manual_review: bool = False
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -122,6 +131,7 @@ class AnnotationSession:
             "annotations": self.annotations,
             "ingestion_path": self.ingestion_path.value,
             "source": self.source,
+            "page_count": self.page_count,
             "needs_manual_review": self.needs_manual_review,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -139,6 +149,7 @@ class AnnotationSession:
             annotations=data.get("annotations", {}),
             ingestion_path=IngestionPath(data.get("ingestion_path", "local_file")),
             source=data.get("source", ""),
+            page_count=data.get("page_count", 1),
             needs_manual_review=data.get("needs_manual_review", False),
             created_at=data.get("created_at", datetime.now().isoformat()),
             updated_at=data.get("updated_at", datetime.now().isoformat()),
@@ -167,6 +178,10 @@ class SessionManager:
     def _get_page_image_path(self, session_id: str) -> Path:
         """Get the page.tif path."""
         return self._get_session_dir(session_id) / "page.tif"
+
+    def _get_crops_dir(self, session_id: str) -> Path:
+        """Get the crops directory path."""
+        return self._get_session_dir(session_id) / "crops"
 
     def create_session(
         self,
@@ -219,6 +234,41 @@ class SessionManager:
         self._save_session(session)
 
         logger.info(f"Created session {session_id} for {language}/{script_variant}")
+        return session
+
+    def populate_session(
+        self,
+        session_id: str,
+        *,
+        image_source: Optional[Path] = None,
+        image_bytes: Optional[bytes] = None,
+        iiif_manifest_url: Optional[str] = None,
+    ) -> Optional[AnnotationSession]:
+        """Materialize a session's source page, segmentation, and line crops."""
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+
+        page_path, page_count = self._materialize_session_page(
+            session,
+            image_source=image_source,
+            image_bytes=image_bytes,
+            iiif_manifest_url=iiif_manifest_url,
+        )
+        segmentation_engine, lines = self._segment_page_into_lines(session, page_path)
+
+        session.page_count = page_count
+        session.segmentation_engine = segmentation_engine
+        session.lines = lines
+        session.needs_manual_review = segmentation_engine != SegmentationEngine.BLLA
+        session.updated_at = datetime.now().isoformat()
+        self._save_session(session)
+        logger.info(
+            "Populated session %s with %s lines using %s",
+            session_id,
+            len(lines),
+            segmentation_engine.value,
+        )
         return session
 
     def get_session(self, session_id: str) -> Optional[AnnotationSession]:
@@ -317,6 +367,247 @@ class SessionManager:
         
         with open(session_json_path, 'w', encoding='utf-8') as f:
             json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
+
+    def _materialize_session_page(
+        self,
+        session: AnnotationSession,
+        *,
+        image_source: Optional[Path] = None,
+        image_bytes: Optional[bytes] = None,
+        iiif_manifest_url: Optional[str] = None,
+    ) -> Tuple[Path, int]:
+        page_path = self._get_page_image_path(session.session_id)
+        session_dir = self._get_session_dir(session.session_id)
+
+        with tempfile.TemporaryDirectory(prefix=f"{session.session_id}-ingest-", dir=session_dir) as td:
+            temp_dir = Path(td)
+            source_path = self._resolve_source_path(
+                session,
+                temp_dir,
+                image_source=image_source,
+                image_bytes=image_bytes,
+                iiif_manifest_url=iiif_manifest_url,
+            )
+            page_images = expand_input_to_images(source_path, temp_dir / "pages")
+            if not page_images:
+                raise ValueError(f"No page images could be extracted from {source_path}")
+
+            with Image.open(page_images[0]) as img:
+                normalized = img.convert("RGB") if img.mode not in ("RGB", "L") else img.copy()
+                normalized.save(page_path, format="TIFF")
+
+            return page_path, len(page_images)
+
+    def _resolve_source_path(
+        self,
+        session: AnnotationSession,
+        temp_dir: Path,
+        *,
+        image_source: Optional[Path] = None,
+        image_bytes: Optional[bytes] = None,
+        iiif_manifest_url: Optional[str] = None,
+    ) -> Path:
+        if image_bytes is not None:
+            suffix = Path(session.source).suffix or ".bin"
+            upload_path = temp_dir / f"upload{suffix}"
+            upload_path.write_bytes(image_bytes)
+            return upload_path
+
+        if image_source is not None:
+            if not image_source.exists():
+                raise FileNotFoundError(f"Source image not found: {image_source}")
+            return image_source
+
+        if iiif_manifest_url is not None:
+            image_bytes, suffix = self._fetch_iiif_image(iiif_manifest_url)
+            iiif_path = temp_dir / f"iiif{suffix}"
+            iiif_path.write_bytes(image_bytes)
+            return iiif_path
+
+        raise ValueError("No source image data provided for session materialization")
+
+    def _fetch_iiif_image(self, manifest_url: str) -> Tuple[bytes, str]:
+        with urlopen(manifest_url) as response:
+            manifest = json.loads(response.read().decode("utf-8"))
+
+        image_url = self._extract_iiif_image_url(manifest)
+        with urlopen(image_url) as response:
+            image_bytes = response.read()
+            content_type = response.headers.get_content_type()
+
+        suffix = (
+            Path(urlparse(image_url).path).suffix
+            or mimetypes.guess_extension(content_type or "")
+            or ".jpg"
+        )
+        return image_bytes, suffix
+
+    def _extract_iiif_image_url(self, manifest: Dict) -> str:
+        # IIIF Presentation API v3
+        items = manifest.get("items") or []
+        if items:
+            canvas = items[0]
+            anno_pages = canvas.get("items") or []
+            if anno_pages:
+                annotations = anno_pages[0].get("items") or []
+                if annotations:
+                    body = annotations[0].get("body") or {}
+                    body_id = body.get("id") or body.get("@id")
+                    if body_id:
+                        return body_id
+
+        # IIIF Presentation API v2
+        sequences = manifest.get("sequences") or []
+        if sequences:
+            canvases = sequences[0].get("canvases") or []
+            if canvases:
+                images = canvases[0].get("images") or []
+                if images:
+                    resource = images[0].get("resource") or {}
+                    resource_id = resource.get("@id") or resource.get("id")
+                    if resource_id:
+                        return resource_id
+
+        raise ValueError("Could not extract an image URL from IIIF manifest")
+
+    def _segment_page_into_lines(
+        self, session: AnnotationSession, page_path: Path
+    ) -> Tuple[SegmentationEngine, List[LineSegment]]:
+        with Image.open(page_path) as img:
+            working_image = img.convert("L")
+            width, height = working_image.size
+
+            try:
+                blla_seg = self._run_blla_segmentation(working_image, session.language)
+                blla_geometries = self._segmentation_to_geometries(blla_seg)
+                if len(blla_geometries) >= 3:
+                    return SegmentationEngine.BLLA, self._write_line_crops(
+                        session.session_id, page_path, blla_geometries
+                    )
+            except Exception as exc:
+                logger.warning("BLLA segmentation failed for session %s: %s", session.session_id, exc)
+
+            try:
+                pageseg_seg = self._run_pageseg_segmentation(working_image, session.language)
+                pageseg_geometries = self._segmentation_to_geometries(pageseg_seg)
+                if pageseg_geometries:
+                    return SegmentationEngine.PAGESEG, self._write_line_crops(
+                        session.session_id, page_path, pageseg_geometries
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "pageseg segmentation failed for session %s: %s", session.session_id, exc
+                )
+
+        manual_geometry = {
+            "bbox": (0, 0, max(width - 1, 0), max(height - 1, 0)),
+            "boundary_points": [
+                (0, 0),
+                (0, max(height - 1, 0)),
+                (max(width - 1, 0), max(height - 1, 0)),
+                (max(width - 1, 0), 0),
+            ],
+            "baseline_points": None,
+        }
+        return SegmentationEngine.MANUAL, self._write_line_crops(
+            session.session_id, page_path, [manual_geometry]
+        )
+
+    def _run_blla_segmentation(self, image: Image.Image, language: str):
+        from kraken.blla import segment
+
+        return segment(image, text_direction=self._text_direction(language), raise_on_error=True)
+
+    def _run_pageseg_segmentation(self, image: Image.Image, language: str):
+        from kraken.pageseg import segment
+
+        return segment(image, text_direction=self._text_direction(language))
+
+    def _text_direction(self, language: str) -> str:
+        lang_info = LANGUAGE_REGISTRY.get(language, {})
+        return "horizontal-rl" if lang_info.get("direction") == "rtl" else "horizontal-lr"
+
+    def _segmentation_to_geometries(self, seg) -> List[Dict[str, object]]:
+        geometries: List[Dict[str, object]] = []
+        for line in getattr(seg, "lines", []):
+            bbox = getattr(line, "bbox", None)
+            boundary = getattr(line, "boundary", None)
+            baseline = getattr(line, "baseline", None)
+
+            boundary_points = self._normalize_points(boundary)
+            baseline_points = self._normalize_points(baseline)
+            if bbox and len(bbox) == 4:
+                bbox_tuple = tuple(int(v) for v in bbox)
+            elif boundary_points:
+                xs = [point[0] for point in boundary_points]
+                ys = [point[1] for point in boundary_points]
+                bbox_tuple = (min(xs), min(ys), max(xs), max(ys))
+            else:
+                continue
+
+            if not boundary_points:
+                left, top, right, bottom = bbox_tuple
+                boundary_points = [
+                    (left, top),
+                    (left, bottom),
+                    (right, bottom),
+                    (right, top),
+                ]
+
+            geometries.append(
+                {
+                    "bbox": bbox_tuple,
+                    "boundary_points": boundary_points,
+                    "baseline_points": baseline_points,
+                }
+            )
+        return geometries
+
+    def _normalize_points(self, points) -> Optional[List[Tuple[int, int]]]:
+        if not points:
+            return None
+        return [(int(point[0]), int(point[1])) for point in points]
+
+    def _write_line_crops(
+        self,
+        session_id: str,
+        page_path: Path,
+        geometries: List[Dict[str, object]],
+    ) -> List[LineSegment]:
+        crops_dir = self._get_crops_dir(session_id)
+        for old_crop in crops_dir.glob("line_*.jpg"):
+            old_crop.unlink()
+
+        line_segments: List[LineSegment] = []
+        with Image.open(page_path) as img:
+            width, height = img.size
+            for order, geometry in enumerate(geometries, start=1):
+                bbox = self._clamp_bbox(geometry["bbox"], width, height)
+                crop = img.crop(bbox).convert("RGB")
+                filename = f"line_{order:03d}.jpg"
+                crop_path = crops_dir / filename
+                crop.save(crop_path, format="JPEG")
+
+                line_segments.append(
+                    LineSegment(
+                        line_id=f"line_{order:03d}",
+                        order=order,
+                        baseline_points=geometry.get("baseline_points"),
+                        boundary_points=geometry.get("boundary_points"),
+                        image_crop_path=f"crops/{filename}",
+                    )
+                )
+        return line_segments
+
+    def _clamp_bbox(
+        self, bbox: Tuple[int, int, int, int], width: int, height: int
+    ) -> Tuple[int, int, int, int]:
+        left, top, right, bottom = (int(v) for v in bbox)
+        left = min(max(left, 0), max(width - 1, 0))
+        top = min(max(top, 0), max(height - 1, 0))
+        right = min(max(right, left + 1), max(width, left + 1))
+        bottom = min(max(bottom, top + 1), max(height, top + 1))
+        return left, top, right, bottom
 
     def _export_alto(self, session: AnnotationSession) -> str:
         """Export session to ALTO XML format."""
