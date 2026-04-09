@@ -123,6 +123,20 @@ def _run_tesseract(
     return result.stdout.strip()
 
 
+def _run_tesseract_model_file(image_path: Path, model_path: Path) -> str:
+    if not model_path.exists():
+        raise ClickException(f"Tesseract model file not found: {model_path}")
+    if model_path.suffix.lower() != ".traineddata":
+        raise ClickException(
+            "Explicit Tesseract model override must point to a .traineddata file."
+        )
+    return _run_tesseract(
+        image_path,
+        model_path.stem,
+        tessdata_dir=model_path.parent,
+    )
+
+
 def _run_tesseract_with_lang_fallback(
     image_path: Path,
     lang_candidates: list[str],
@@ -265,6 +279,10 @@ def run_printed_ocr(
                 "Unsupported engine for Syriac. Use auto or tesseract."
             )
 
+        if model:
+            text = _run_tesseract_model_file(image_path, Path(model))
+            return {"text": text, "engine": "tesseract", "language": lang_key}
+
         base_text = _run_tesseract(image_path, "syr")
         # Estrangela/default stays on baseline Tesseract model.
         if variant_key in ("default", "estrangela"):
@@ -308,6 +326,10 @@ def run_printed_ocr(
                 "Unsupported engine for Coptic. Use auto or tesseract."
             )
 
+        if model:
+            text = _run_tesseract_model_file(image_path, Path(model))
+            return {"text": text, "engine": "tesseract", "language": lang_key}
+
         # Tesseract path
         if COPTIC_LOCAL_MODEL.exists():
             text = _run_tesseract(image_path, "cop", tessdata_dir=COPTIC_TESSDATA_DIR)
@@ -318,6 +340,9 @@ def run_printed_ocr(
 
     if lang_key == "armenian":
         if engine_key in ("auto", "tesseract"):
+            if model:
+                text = _run_tesseract_model_file(image_path, Path(model))
+                return {"text": text, "engine": "tesseract", "language": lang_key}
             # Prefer local hye-calfa-n model, fallback to system hye.
             if ARMENIAN_LOCAL_MODEL.exists():
                 try:
@@ -337,6 +362,9 @@ def run_printed_ocr(
 
     if lang_key == "geez":
         if engine_key in ("auto", "tesseract"):
+            if model:
+                text = _run_tesseract_model_file(image_path, Path(model))
+                return {"text": text, "engine": "tesseract", "language": lang_key}
             # Prefer classical Geez code if available, then practical fallbacks.
             text = _run_tesseract_with_lang_fallback(
                 image_path,

@@ -1,6 +1,6 @@
 plan_id: harness_os_upgrade
-updated_at: 2026-04-08
-current_phase: step_2_annotation_vertical_slice
+updated_at: 2026-04-09
+current_phase: step_5_pipeline_level_submission_and_artifact_promotion
 status: in_progress
 
 completed:
@@ -14,44 +14,89 @@ completed:
   - added automatic annotation-session page materialization, segmentation fallback, and crop generation
   - expanded annotation API responses with segmentation_engine, page_count, line_count, needs_manual_review, and lines
   - added a dedicated annotation-api CLI command instead of mounting the annotation app under the main OCR API
+  - introduced a frozen manifest manager in msocr/data/manifest.py for manifest_id-based resolution of training and benchmark inputs
+  - created a canonical data/manifests/ registry with a documented manifest schema aligned to the Harness upgrade docs
+  - upgraded msocr benchmark to accept manifest_id, resolve frozen manifests, prefer holdout partitions, and emit metrics.json-compatible provenance fields
+  - extended msocr train with split_manifest_id support so manifest-driven runs can resolve XML inputs from train/validation/holdout partitions
+  - replaced the generic dataset splitter's file-level random split with manuscript_id-isolated partitions and richer split manifest output
+  - added regression tests for manifest loading, manuscript overlap protection, and printed benchmark provenance reporting
+  - added a manifest-aware RunPod orchestration client in msocr/pipeline/runpod_client.py that builds official REST pod payloads and supports submit/poll/stop flows
+  - added a Harness Artifact Registry adapter in msocr/pipeline/har_client.py that wraps the documented hc generic-package and metadata workflow for model bundles
+  - extended the CLI with dry-run-first runpod-submit and har-publish commands so Harness/RunPod integration can be rehearsed locally before live submission
+  - added focused orchestration tests covering GPU-tier selection, manifest-derived RunPod payloads, and HAR bundle publication planning
+  - added a higher-level pipeline-submit workflow that chains manifest-aware RunPod submission, benchmark evaluation, policy gating, and HAR publication from one entrypoint
+  - taught the printed benchmark path to accept default model and engine overrides so the promotion workflow can evaluate the same artifact it plans to publish
+  - added explicit Tesseract traineddata override support for printed Syriac, Coptic, Armenian, and Geez routes to benchmark newly trained local artifacts
+  - automated Dockerfile.sha sidecar generation from the real Dockerfile input during promotion rather than relying on manual sidecar assembly
+  - added workflow regression tests covering gate behavior, successful promotion, and printed OCR traineddata override routing
 
 decisions:
   - annotation_api remains a dedicated FastAPI app module served by the new msocr annotation-api command; merging into msocr/service/api.py is deferred
   - the legacy alias armenia remains accepted for compatibility, but all stored and returned language values are canonicalized to armenian
+  - direct --gt-dir/--gt-file training remains available for ad hoc local runs, but reproducible training and benchmark paths now flow through manifest_id resolution
+  - the HAR adapter uses the documented Harness CLI workflow rather than a guessed private API so artifact publication stays aligned with the current public product surface
+  - the pipeline-level workflow blocks HAR promotion unless a benchmark manifest is supplied and the CER policy gate passes
 
 verification:
   - command: uv run pytest tests/data/test_session_manager.py tests/service/test_annotation_api.py -q
     result: pass
-    notes: pending rerun after step 2 changes
+    notes: rerun after Step 3 changes
+  - command: uv run pytest tests/data/test_manifest.py tests/evaluation/test_printed_benchmark.py tests/data/test_session_manager.py tests/service/test_annotation_api.py -q
+    result: pass
+    notes: manifest manager and benchmark contract regression coverage
   - command: uv run pytest -q
     result: pass
-    notes: pending rerun after step 2 changes
+    notes: 42 passed after Step 5 pipeline workflow changes
   - command: uv run python -m compileall msocr
     result: pass
-    notes: pending rerun after step 2 changes
+    notes: rerun after Step 5 pipeline workflow changes
+  - command: uv run pytest tests/pipeline/test_runpod_client.py tests/pipeline/test_har_client.py -q
+    result: pass
+    notes: orchestration adapter regression coverage
+  - command: uv run pytest tests/pipeline/test_workflow.py tests/pipelines/test_printed_ocr.py -q
+    result: pass
+    notes: pipeline-level workflow and printed OCR override regression coverage
 
 changed_files:
+  - data/manifests/README.md
   - msocr/language_registry.py
   - msocr/cli.py
   - msocr/pipelines/printed_ocr.py
   - msocr/service/runtime.py
   - msocr/service/gradio_demo.py
   - msocr/output/formats.py
+  - msocr/pipeline/__init__.py
+  - msocr/pipeline/runpod_client.py
+  - msocr/pipeline/har_client.py
+  - msocr/pipeline/workflow.py
   - msocr/service/annotation_api.py
+  - msocr/data/__init__.py
+  - msocr/data/manifest.py
   - msocr/data/session_manager.py
+  - msocr/datasets/splitter.py
+  - msocr/evaluation/printed_benchmark.py
+  - msocr/pipelines/printed_ocr.py
   - pipeline/printed_ocr_training.yaml
-  - msocr/cli.py
   - tests/service/test_annotation_api.py
+  - tests/data/test_manifest.py
+  - tests/evaluation/test_printed_benchmark.py
+  - tests/pipeline/test_runpod_client.py
+  - tests/pipeline/test_har_client.py
+  - tests/pipeline/test_workflow.py
+  - tests/pipelines/test_printed_ocr.py
 
-remaining_for_step_2:
-  - add higher-fidelity segmentation review tools beyond current fallback-generated crops
-  - support multi-page session workflows instead of first-page normalization only
-  - decide whether the main OCR FastAPI app should proxy or mount annotation routes
+remaining_for_step_5:
+  - decide how trained model retrieval from RunPod should be automated so pipeline-submit can hand off a fetched local artifact instead of requiring --model-file
+  - add structured notifications or state updates for policy-gate failures and successful promotions
+  - decide how Harness secrets and registry context should be injected for non-interactive hc execution in CI delegates
 
 known_risks:
   - the shared registry now unifies language metadata, but route selection is still hardcoded in msocr/pipelines/printed_ocr.py and msocr/service/runtime.py
-  - Harness/RunPod orchestration modules described in docs do not exist yet; this step only normalized the local contract layer
+  - Harness/RunPod orchestration modules described in docs do not exist yet; this step established the local manifest and benchmark contract layer only
   - annotation API now hydrates sessions, but segmentation quality still depends entirely on Kraken fallback behavior and lacks manual redraw/edit endpoints
   - IIIF support currently resolves the first canvas image only
+  - DVC tracking is documented and surfaced on manifest metadata, but the repo does not yet enforce DVC sidecars or automate data publication
+  - live Harness publication still depends on the external hc CLI being installed and authenticated on the delegate or developer machine
+  - pipeline-submit still assumes the trained model artifact is already present locally after RunPod execution; automated retrieval is not implemented yet
 
-next_recommended_action: step_3_reproducible_manifests_and_benchmark_contract
+next_recommended_action: step_6_model_retrieval_notifications_and_delegate_runtime_wiring

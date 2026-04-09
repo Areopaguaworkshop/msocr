@@ -1,12 +1,15 @@
 """CLI interface for msocr."""
 
+import json
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import click
 import yaml
 
+from msocr.data.manifest import load_frozen_manifest
 from msocr.language_registry import (
     CLI_LANGUAGE_ALIASES,
     CLI_LANGUAGE_CODES,
@@ -75,6 +78,70 @@ def _collect_xml_files(gt_dir: Path, gt_file: str) -> List[Path]:
     if not xml_files:
         raise click.ClickException("No XML files found. Provide --gt-dir or --gt-file.")
     return xml_files
+
+
+def _collect_xml_files_from_manifest(
+    manifest_ref: str,
+    *,
+    partition: str = "train",
+) -> tuple[List[Path], str]:
+    try:
+        manifest = load_frozen_manifest(manifest_ref)
+        cases = manifest.get_partition(partition)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    xml_files: List[Path] = []
+    for case in cases:
+        if case.xml_path is None:
+            raise click.ClickException(
+                f"Manifest case {case.id} does not define xml_path for partition {partition}."
+            )
+        if not case.xml_path.exists():
+            raise click.ClickException(f"Ground-truth XML file not found: {case.xml_path}")
+        xml_files.append(case.xml_path)
+
+    if not xml_files:
+        raise click.ClickException(
+            f"Manifest {manifest.manifest_id} partition {partition} has no XML files."
+        )
+    return xml_files, manifest.manifest_id
+
+
+def _require_manifest_reference(
+    manifest: Path | None,
+    manifest_id: str | None,
+) -> str | Path:
+    if manifest and manifest_id:
+        raise click.ClickException("Provide either --manifest or --manifest-id, not both.")
+    if manifest is None and not manifest_id:
+        raise click.ClickException("Provide one of --manifest or --manifest-id.")
+    return manifest if manifest is not None else str(manifest_id)
+
+
+def _default_pipeline_run_id() -> str:
+    return datetime.now(timezone.utc).strftime("run-%Y%m%d%H%M%S")
+
+
+def _print_json(payload: Dict[str, Any]) -> None:
+    click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _parse_metadata_pairs(values: tuple[str, ...]) -> Dict[str, str]:
+    metadata: Dict[str, str] = {}
+    for raw_value in values:
+        if "=" not in raw_value:
+            raise click.ClickException(
+                f"Invalid metadata entry {raw_value!r}. Expected KEY=VALUE."
+            )
+        key, value = raw_value.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise click.ClickException(
+                f"Invalid metadata entry {raw_value!r}. Metadata key cannot be empty."
+            )
+        metadata[key] = value.strip()
+    return metadata
 
 
 def _parse_output_formats(format_str: str) -> List[str]:
@@ -376,7 +443,18 @@ def htr(input_path, lang, model, provider, output_format, output, device):
     "--gt-dir", type=click.Path(path_type=Path), help="Directory containing XML files"
 )
 @click.option("--gt-file", help="Single XML file for training")
-def train(lang, mode, config, gt_dir, gt_file):
+@click.option(
+    "--split-manifest-id",
+    help="Frozen split manifest id or path used to resolve the training partition",
+)
+@click.option(
+    "--split-partition",
+    default="train",
+    show_default=True,
+    type=click.Choice(["train", "validation", "holdout"], case_sensitive=False),
+    help="Manifest partition to use when --split-manifest-id is provided",
+)
+def train(lang, mode, config, gt_dir, gt_file, split_manifest_id, split_partition):
     """Train OCR/HTR models with Kraken ketos."""
     lang_key = _normalize_lang(lang)
     mode_key = mode.lower()
@@ -390,17 +468,31 @@ def train(lang, mode, config, gt_dir, gt_file):
     with config_path.open("r", encoding="utf-8") as handle:
         config_dict = yaml.safe_load(handle)
 
-    xml_files = _collect_xml_files(gt_dir, gt_file)
+    manifest_label = None
+    if split_manifest_id:
+        if gt_dir or gt_file:
+            raise click.ClickException(
+                "Use either --split-manifest-id or --gt-dir/--gt-file, not both."
+            )
+        xml_files, manifest_label = _collect_xml_files_from_manifest(
+            split_manifest_id,
+            partition=split_partition,
+        )
+    else:
+        xml_files = _collect_xml_files(gt_dir, gt_file)
 
     trainer = KetosTrainer(config_dict)
     ok = trainer.train(xml_files=xml_files)
     if not ok:
         raise click.ClickException("Training failed. See logs for details.")
 
-    click.echo(
+    summary = (
         f"Training completed: engine={ENGINE_NAME} mode={mode_key} "
         f"lang={lang_key} xml_files={len(xml_files)} config={config_path}"
     )
+    if manifest_label:
+        summary += f" split_manifest_id={manifest_label} partition={split_partition.lower()}"
+    click.echo(summary)
 
 
 @main.command()
@@ -417,9 +509,12 @@ def preprocess(input_dir):
 @main.command(name="benchmark")
 @click.option(
     "--manifest",
-    required=True,
     type=click.Path(path_type=Path),
     help="Benchmark manifest path (.json or .jsonl)",
+)
+@click.option(
+    "--manifest-id",
+    help="Frozen benchmark manifest id under data/manifests/ (or explicit path)",
 )
 @click.option(
     "--output",
@@ -436,21 +531,708 @@ def preprocess(input_dir):
     show_default=True,
     help="CER pass threshold for printed benchmark",
 )
-def benchmark_printed(manifest, output, cer_threshold):
+@click.option(
+    "--benchmark-id",
+    help="Stable benchmark identifier; defaults to the resolved manifest_id",
+)
+@click.option(
+    "--model-id",
+    default="printed_ocr",
+    show_default=True,
+    help="Model family or route identifier for metrics.json provenance",
+)
+@click.option(
+    "--model-version",
+    default="local",
+    show_default=True,
+    help="Model version recorded in the benchmark report",
+)
+@click.option(
+    "--pipeline-run-id",
+    default="local",
+    show_default=True,
+    help="Pipeline or orchestration run identifier recorded in the report",
+)
+@click.option(
+    "--preprocessing-profile",
+    default="default",
+    show_default=True,
+    help="Preprocessing profile label recorded in the report",
+)
+def benchmark_printed(
+    manifest,
+    manifest_id,
+    output,
+    cer_threshold,
+    benchmark_id,
+    model_id,
+    model_version,
+    pipeline_run_id,
+    preprocessing_profile,
+):
     """Run printed OCR benchmark and write a JSON report."""
     from msocr.evaluation.printed_benchmark import run_printed_benchmark
 
+    manifest_ref = _require_manifest_reference(manifest, manifest_id)
     report = run_printed_benchmark(
-        manifest_path=manifest,
         output_path=output,
+        manifest_path=manifest_ref if isinstance(manifest_ref, Path) else None,
+        manifest_id=manifest_ref if isinstance(manifest_ref, str) else None,
         cer_threshold=cer_threshold,
+        benchmark_id=benchmark_id,
+        model_id=model_id,
+        model_version=model_version,
+        preprocessing_profile=preprocessing_profile,
+        pipeline_run_id=pipeline_run_id,
     )
     click.echo(
         "benchmark=printed "
+        f"benchmark_id={report['benchmark_id']} manifest_id={report['manifest_id']} "
         f"total={report['total_cases']} ok={report['ok_cases']} "
-        f"errors={report['error_cases']} pass_rate={report['pass_rate']:.3f}"
+        f"errors={report['error_cases']} pass_rate={report['pass_rate']:.3f} "
+        f"pass={str(report['pass_fail']).lower()}"
     )
     click.echo(f"report={output}")
+
+
+@main.command(name="runpod-submit")
+@click.option(
+    "--manifest",
+    type=click.Path(path_type=Path),
+    help="Training split manifest path",
+)
+@click.option(
+    "--manifest-id",
+    help="Training split manifest id under data/manifests/ (or explicit path)",
+)
+@click.option("--lang", required=False, type=LANG_CHOICES, help="Training language")
+@click.option(
+    "--script-variant",
+    default="default",
+    show_default=True,
+    help="Script variant label used for pod metadata and artifact naming",
+)
+@click.option(
+    "--writing-mode",
+    type=click.Choice(["printed", "handwritten"], case_sensitive=False),
+    default="printed",
+    show_default=True,
+    help="Writing mode routed through the training job",
+)
+@click.option(
+    "--mode",
+    type=MODE_CHOICES,
+    help="Training mode; defaults to ocr for printed and htr for handwritten",
+)
+@click.option(
+    "--trainer",
+    type=click.Choice(["auto", "kraken", "tesstrain", "tesseract"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Training backend hint used for RunPod GPU tier selection",
+)
+@click.option(
+    "--config",
+    type=click.Path(path_type=Path),
+    help="Training config path mounted into the training image",
+)
+@click.option(
+    "--split-partition",
+    default="train",
+    show_default=True,
+    type=click.Choice(["train", "validation", "holdout"], case_sensitive=False),
+    help="Manifest partition used to estimate corpus size and build the train command",
+)
+@click.option(
+    "--pipeline-run-id",
+    default="",
+    help="Pipeline run identifier; defaults to a UTC timestamp-based value",
+)
+@click.option(
+    "--model-version",
+    default="local",
+    show_default=True,
+    help="Model version label passed into the training environment",
+)
+@click.option(
+    "--training-image",
+    default="runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+    show_default=True,
+    help="Training container image",
+)
+@click.option(
+    "--gpu-tier",
+    type=click.Choice(["auto", "rtx4090", "rtx3090", "a100"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="RunPod GPU tier selection",
+)
+@click.option(
+    "--volume-gb",
+    default=20,
+    show_default=True,
+    type=int,
+    help="Persistent Pod volume size in GB",
+)
+@click.option(
+    "--container-disk-gb",
+    default=50,
+    show_default=True,
+    type=int,
+    help="Container disk size in GB",
+)
+@click.option(
+    "--interruptible",
+    is_flag=True,
+    help="Request a lower-cost interruptible pod instead of a reserved pod",
+)
+@click.option(
+    "--network-volume-id",
+    default="",
+    help="Optional existing RunPod network volume id to attach",
+)
+@click.option(
+    "--container-registry-auth-id",
+    default="",
+    help="Optional RunPod private registry auth id for training images",
+)
+@click.option(
+    "--data-center-id",
+    "data_center_ids",
+    multiple=True,
+    help="Preferred RunPod data center id. Repeat for priority order.",
+)
+@click.option(
+    "--command",
+    default="",
+    help="Override the generated container command passed to bash -lc",
+)
+@click.option(
+    "--execute",
+    is_flag=True,
+    help="Actually submit the pod to RunPod. Without this flag the command prints the plan only.",
+)
+@click.option(
+    "--wait",
+    is_flag=True,
+    help="When used with --execute, poll until the pod reaches RUNNING",
+)
+def runpod_submit(
+    manifest,
+    manifest_id,
+    lang,
+    script_variant,
+    writing_mode,
+    mode,
+    trainer,
+    config,
+    split_partition,
+    pipeline_run_id,
+    model_version,
+    training_image,
+    gpu_tier,
+    volume_gb,
+    container_disk_gb,
+    interruptible,
+    network_volume_id,
+    container_registry_auth_id,
+    data_center_ids,
+    command,
+    execute,
+    wait,
+):
+    """Create a manifest-aware RunPod training job plan or submit it."""
+    from msocr.pipeline.runpod_client import RunPodClient, build_training_job
+
+    manifest_ref = _require_manifest_reference(manifest, manifest_id)
+    try:
+        resolved_manifest = load_frozen_manifest(manifest_ref)
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    language = _normalize_lang(lang or resolved_manifest.language or "")
+    if not language:
+        raise click.ClickException("Training language is required via --lang or manifest metadata.")
+
+    writing_mode_key = writing_mode.lower()
+    mode_key = mode.lower() if mode else ("ocr" if writing_mode_key == "printed" else "htr")
+    trainer_key = trainer.lower()
+    config_path = Path(config) if config else None
+    run_id = pipeline_run_id.strip() or _default_pipeline_run_id()
+
+    try:
+        job = build_training_job(
+            manifest=resolved_manifest,
+            language=language,
+            script_variant=script_variant,
+            writing_mode=writing_mode_key,
+            mode=mode_key,
+            pipeline_run_id=run_id,
+            model_version=model_version,
+            training_image=training_image,
+            training_backend=None if trainer_key == "auto" else trainer_key,
+            config_path=config_path,
+            partition=split_partition.lower(),
+            gpu_tier=gpu_tier.lower(),
+            command=command.strip() or None,
+            volume_in_gb=volume_gb,
+            container_disk_in_gb=container_disk_gb,
+            interruptible=interruptible,
+            network_volume_id=network_volume_id.strip() or None,
+            container_registry_auth_id=container_registry_auth_id.strip() or None,
+            data_center_ids=data_center_ids,
+        )
+    except (KeyError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    plan = {
+        "manifest_id": resolved_manifest.manifest_id,
+        "manifest_path": str(resolved_manifest.path),
+        "pipeline_run_id": run_id,
+        "language": language,
+        "script_variant": script_variant,
+        "writing_mode": writing_mode_key,
+        "mode": mode_key,
+        "corpus_size": len(resolved_manifest.get_partition(split_partition.lower())),
+        "payload": job.to_api_payload(),
+    }
+    if not execute:
+        _print_json(plan)
+        return
+
+    try:
+        client = RunPodClient.from_env()
+        pod = client.create_pod(job)
+        response: Dict[str, Any] = {
+            **plan,
+            "submitted_pod": {
+                "id": pod.pod_id,
+                "name": pod.name,
+                "desired_status": pod.desired_status,
+                "public_ip": pod.public_ip,
+                "port_mappings": pod.port_mappings,
+            },
+        }
+        if wait:
+            ready_pod = client.wait_for_status(pod.pod_id)
+            response["submitted_pod"] = {
+                "id": ready_pod.pod_id,
+                "name": ready_pod.name,
+                "desired_status": ready_pod.desired_status,
+                "public_ip": ready_pod.public_ip,
+                "port_mappings": ready_pod.port_mappings,
+            }
+        _print_json(response)
+    except (RuntimeError, TimeoutError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+@main.command(name="har-publish")
+@click.option("--registry", required=True, help="Harness Artifact Registry name")
+@click.option("--lang", required=True, type=LANG_CHOICES, help="Model language")
+@click.option(
+    "--script-variant",
+    default="default",
+    show_default=True,
+    help="Script variant used in artifact naming",
+)
+@click.option(
+    "--writing-mode",
+    type=click.Choice(["printed", "handwritten"], case_sensitive=False),
+    default="printed",
+    show_default=True,
+    help="Writing mode used in artifact naming",
+)
+@click.option("--version", required=True, help="Artifact version or sequence id")
+@click.option(
+    "--model-file",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Primary model file to upload (.mlmodel or .traineddata)",
+)
+@click.option(
+    "--metrics-file",
+    type=click.Path(path_type=Path, exists=True),
+    help="Optional metrics.json sidecar",
+)
+@click.option(
+    "--config-file",
+    type=click.Path(path_type=Path, exists=True),
+    help="Optional training config sidecar",
+)
+@click.option(
+    "--dockerfile-sha-file",
+    type=click.Path(path_type=Path, exists=True),
+    help="Optional Dockerfile.sha sidecar",
+)
+@click.option(
+    "--pkg-url",
+    default="https://pkg.harness.io",
+    show_default=True,
+    help="Harness Artifact Registry packages base URL",
+)
+@click.option("--description", default="", help="Optional artifact description")
+@click.option(
+    "--metadata",
+    multiple=True,
+    help="Artifact metadata entry in KEY=VALUE form. Repeat as needed.",
+)
+@click.option(
+    "--execute",
+    is_flag=True,
+    help="Actually invoke the Harness CLI. Without this flag the command prints the planned uploads only.",
+)
+def har_publish(
+    registry,
+    lang,
+    script_variant,
+    writing_mode,
+    version,
+    model_file,
+    metrics_file,
+    config_file,
+    dockerfile_sha_file,
+    pkg_url,
+    description,
+    metadata,
+    execute,
+):
+    """Publish a model bundle and sidecars to Harness Artifact Registry."""
+    from msocr.pipeline.har_client import HARClient, build_bundle
+
+    metadata_map = _parse_metadata_pairs(tuple(metadata))
+    bundle = build_bundle(
+        registry=registry,
+        language=_normalize_lang(lang),
+        script_variant=script_variant,
+        writing_mode=writing_mode.lower(),
+        version=version,
+        model_file=model_file,
+        metrics_file=metrics_file,
+        config_file=config_file,
+        dockerfile_sha_file=dockerfile_sha_file,
+        pkg_url=pkg_url,
+        description=description.strip() or None,
+        metadata=metadata_map,
+    )
+    client = HARClient(pkg_url=pkg_url)
+    commands = [" ".join(command) for command in client.plan_commands(bundle)]
+    plan = {
+        "artifact_ref": bundle.artifact_ref,
+        "registry": bundle.registry,
+        "pkg_url": bundle.pkg_url,
+        "files": [
+            {
+                "source_path": str(upload.source_path),
+                "package_path": upload.package_path,
+            }
+            for upload in bundle.files
+        ],
+        "commands": commands,
+    }
+    if not execute:
+        _print_json(plan)
+        return
+
+    try:
+        client.publish_bundle(bundle)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    _print_json({**plan, "published": True})
+
+
+@main.command(name="pipeline-submit")
+@click.option(
+    "--manifest",
+    type=click.Path(path_type=Path),
+    help="Training split manifest path",
+)
+@click.option(
+    "--manifest-id",
+    help="Training split manifest id under data/manifests/ (or explicit path)",
+)
+@click.option(
+    "--benchmark-manifest",
+    type=click.Path(path_type=Path),
+    help="Benchmark manifest path used for evaluation and policy gating",
+)
+@click.option(
+    "--benchmark-manifest-id",
+    help="Benchmark manifest id under data/manifests/ (or explicit path)",
+)
+@click.option("--lang", required=False, type=LANG_CHOICES, help="Training language")
+@click.option(
+    "--script-variant",
+    default="default",
+    show_default=True,
+    help="Script variant used for policy thresholds and artifact naming",
+)
+@click.option(
+    "--writing-mode",
+    type=click.Choice(["printed", "handwritten"], case_sensitive=False),
+    default="printed",
+    show_default=True,
+    help="Writing mode routed through the training and promotion workflow",
+)
+@click.option(
+    "--mode",
+    type=MODE_CHOICES,
+    help="Training mode; defaults to ocr for printed and htr for handwritten",
+)
+@click.option(
+    "--trainer",
+    type=click.Choice(["auto", "kraken", "tesstrain", "tesseract"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Training backend hint used for RunPod payloads and benchmark overrides",
+)
+@click.option(
+    "--config",
+    type=click.Path(path_type=Path),
+    help="Training config path stored as a sidecar on promotion",
+)
+@click.option(
+    "--pipeline-run-id",
+    default="",
+    help="Pipeline run identifier; defaults to a UTC timestamp-based value",
+)
+@click.option(
+    "--sequence-id",
+    default="",
+    help="Artifact sequence identifier used to build HAR version v<sequence-id>",
+)
+@click.option(
+    "--model-version",
+    default="local",
+    show_default=True,
+    help="Model version recorded in metrics and training environment",
+)
+@click.option(
+    "--model-file",
+    type=click.Path(path_type=Path, exists=True),
+    help="Local trained model artifact to benchmark and publish (.mlmodel or .traineddata)",
+)
+@click.option(
+    "--registry",
+    default="",
+    help="Harness Artifact Registry name used for promotion",
+)
+@click.option(
+    "--pkg-url",
+    default="https://pkg.harness.io",
+    show_default=True,
+    help="Harness Artifact Registry packages base URL",
+)
+@click.option(
+    "--training-image",
+    default="runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+    show_default=True,
+    help="Training container image",
+)
+@click.option(
+    "--gpu-tier",
+    type=click.Choice(["auto", "rtx4090", "rtx3090", "a100"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="RunPod GPU tier selection",
+)
+@click.option(
+    "--volume-gb",
+    default=20,
+    show_default=True,
+    type=int,
+    help="Persistent Pod volume size in GB",
+)
+@click.option(
+    "--container-disk-gb",
+    default=50,
+    show_default=True,
+    type=int,
+    help="Container disk size in GB",
+)
+@click.option(
+    "--interruptible",
+    is_flag=True,
+    help="Request a lower-cost interruptible pod instead of a reserved pod",
+)
+@click.option(
+    "--network-volume-id",
+    default="",
+    help="Optional existing RunPod network volume id to attach",
+)
+@click.option(
+    "--container-registry-auth-id",
+    default="",
+    help="Optional RunPod private registry auth id for training images",
+)
+@click.option(
+    "--data-center-id",
+    "data_center_ids",
+    multiple=True,
+    help="Preferred RunPod data center id. Repeat for priority order.",
+)
+@click.option(
+    "--dockerfile",
+    type=click.Path(path_type=Path),
+    default=Path("Dockerfile"),
+    show_default=True,
+    help="Dockerfile used to build the training image; its SHA is attached on promotion",
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(path_type=Path),
+    default=Path("output/pipelines"),
+    show_default=True,
+    help="Output directory for pipeline metrics and generated sidecars",
+)
+@click.option(
+    "--benchmark-id",
+    default="",
+    help="Stable benchmark identifier; defaults to the benchmark manifest id",
+)
+@click.option(
+    "--model-id",
+    default="",
+    help="Model family identifier recorded in metrics.json",
+)
+@click.option(
+    "--preprocessing-profile",
+    default="default",
+    show_default=True,
+    help="Preprocessing profile recorded in metrics.json",
+)
+@click.option(
+    "--cer-threshold",
+    type=float,
+    help="Optional override for policy gate CER threshold",
+)
+@click.option(
+    "--description",
+    default="",
+    help="Optional artifact description for HAR promotion",
+)
+@click.option(
+    "--metadata",
+    multiple=True,
+    help="Artifact metadata entry in KEY=VALUE form. Repeat as needed.",
+)
+@click.option(
+    "--command",
+    default="",
+    help="Override the generated RunPod container command passed to bash -lc",
+)
+@click.option(
+    "--wait",
+    is_flag=True,
+    help="When used with --execute, poll the submitted RunPod pod until it reaches RUNNING",
+)
+@click.option(
+    "--execute",
+    is_flag=True,
+    help="Execute the full workflow. Without this flag the command prints the end-to-end plan only.",
+)
+def pipeline_submit(
+    manifest,
+    manifest_id,
+    benchmark_manifest,
+    benchmark_manifest_id,
+    lang,
+    script_variant,
+    writing_mode,
+    mode,
+    trainer,
+    config,
+    pipeline_run_id,
+    sequence_id,
+    model_version,
+    model_file,
+    registry,
+    pkg_url,
+    training_image,
+    gpu_tier,
+    volume_gb,
+    container_disk_gb,
+    interruptible,
+    network_volume_id,
+    container_registry_auth_id,
+    data_center_ids,
+    dockerfile,
+    output_dir,
+    benchmark_id,
+    model_id,
+    preprocessing_profile,
+    cer_threshold,
+    description,
+    metadata,
+    command,
+    wait,
+    execute,
+):
+    """Plan or execute a manifest-aware training, benchmark, and promotion workflow."""
+    from msocr.pipeline.workflow import run_training_promotion_workflow
+
+    train_manifest_ref = _require_manifest_reference(manifest, manifest_id)
+    benchmark_manifest_ref: str | Path | None = None
+    if benchmark_manifest or benchmark_manifest_id:
+        benchmark_manifest_ref = _require_manifest_reference(
+            benchmark_manifest,
+            benchmark_manifest_id,
+        )
+
+    try:
+        resolved_train_manifest = load_frozen_manifest(train_manifest_ref)
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    language = _normalize_lang(lang or resolved_train_manifest.language or "")
+    if not language:
+        raise click.ClickException("Training language is required via --lang or manifest metadata.")
+
+    writing_mode_key = writing_mode.lower()
+    mode_key = mode.lower() if mode else ("ocr" if writing_mode_key == "printed" else "htr")
+    run_id = pipeline_run_id.strip() or _default_pipeline_run_id()
+    metadata_map = _parse_metadata_pairs(tuple(metadata))
+
+    try:
+        result = run_training_promotion_workflow(
+            train_manifest_ref=train_manifest_ref,
+            benchmark_manifest_ref=benchmark_manifest_ref,
+            language=language,
+            script_variant=script_variant,
+            writing_mode=writing_mode_key,
+            mode=mode_key,
+            trainer=trainer,
+            config_path=Path(config) if config else None,
+            pipeline_run_id=run_id,
+            sequence_id=sequence_id.strip() or None,
+            model_version=model_version,
+            model_file=model_file,
+            registry=registry.strip() or None,
+            training_image=training_image,
+            gpu_tier=gpu_tier.lower(),
+            volume_in_gb=volume_gb,
+            container_disk_in_gb=container_disk_gb,
+            interruptible=interruptible,
+            network_volume_id=network_volume_id.strip() or None,
+            container_registry_auth_id=container_registry_auth_id.strip() or None,
+            data_center_ids=data_center_ids,
+            dockerfile_path=dockerfile if dockerfile and dockerfile.exists() else None,
+            output_dir=output_dir,
+            cer_threshold=cer_threshold,
+            benchmark_id=benchmark_id.strip() or None,
+            model_id=model_id.strip() or None,
+            preprocessing_profile=preprocessing_profile,
+            pkg_url=pkg_url,
+            description=description.strip() or None,
+            metadata=metadata_map,
+            command=command.strip() or None,
+            wait_for_runpod=wait,
+            execute=execute,
+        )
+    except (RuntimeError, TimeoutError, ValueError, KeyError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    _print_json(result)
 
 
 @main.command(name="api")

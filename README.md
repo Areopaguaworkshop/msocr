@@ -11,6 +11,9 @@ Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract 
   - `train` (Kraken ketos training)
   - `preprocess`
   - `benchmark`
+  - `runpod-submit` (manifest-aware RunPod pod submission, dry-run by default)
+  - `har-publish` (Harness Artifact Registry model bundle publication, dry-run by default)
+  - `pipeline-submit` (end-to-end manifest-aware submit, benchmark, and promotion workflow)
   - `api`
   - `demo`
 - Printed OCR routing:
@@ -70,7 +73,36 @@ uv run msocr benchmark \
 uv run msocr api --host 127.0.0.1 --port 8000
 ```
 
-### 6. Start Gradio demo
+### 6. Plan a RunPod training job
+```bash
+uv run msocr runpod-submit \
+  --manifest-id syriac-printed-v1 \
+  --lang syriac \
+  --script-variant estrangela
+```
+
+### 7. Plan a HAR model publication
+```bash
+uv run msocr har-publish \
+  --registry msocr-models \
+  --lang syriac \
+  --script-variant estrangela \
+  --version v14 \
+  --model-file models/finetune/paynesmith_serto_v1.mlmodel
+```
+
+### 8. Plan the full promotion workflow
+```bash
+uv run msocr pipeline-submit \
+  --manifest-id syriac-train-v1 \
+  --benchmark-manifest-id syriac-bench-v1 \
+  --lang syriac \
+  --script-variant estrangela \
+  --model-file models/tesseract/syr_serto.traineddata \
+  --registry msocr-models
+```
+
+### 9. Start Gradio demo
 ```bash
 uv run msocr demo --host 127.0.0.1 --port 7860
 ```
@@ -103,6 +135,27 @@ uv run msocr htr [OPTIONS] INPUT_PATH
 ```bash
 uv run msocr train --lang <lang> --mode ocr|htr [--config ...] [--gt-dir ...|--gt-file ...]
 ```
+
+### `runpod-submit`
+```bash
+uv run msocr runpod-submit --manifest-id <split_manifest_id> --lang <lang> [OPTIONS]
+```
+- Builds a manifest-aware RunPod pod request using the official pods REST API shape.
+- Defaults to dry-run JSON output; add `--execute` to submit and `--wait` to poll for `RUNNING`.
+
+### `har-publish`
+```bash
+uv run msocr har-publish --registry <registry> --lang <lang> --version <version> --model-file <path> [OPTIONS]
+```
+- Builds a Harness Artifact Registry generic package publication plan.
+- Defaults to dry-run JSON output; add `--execute` to invoke the `hc` CLI.
+
+### `pipeline-submit`
+```bash
+uv run msocr pipeline-submit --manifest-id <train_manifest_id> --benchmark-manifest-id <benchmark_manifest_id> --lang <lang> [OPTIONS]
+```
+- Builds a single manifest-aware workflow covering RunPod submission, benchmark evaluation, policy gating, and HAR promotion.
+- Defaults to dry-run JSON output; add `--execute` to submit the pod, run the benchmark, and publish only if the CER gate passes.
 
 ## API Endpoints
 
@@ -165,6 +218,7 @@ msocr/
 │   ├── data/
 │   ├── evaluation/
 │   ├── models/
+│   ├── pipeline/
 │   ├── pipelines/
 │   ├── preprocessing/
 │   ├── service/
