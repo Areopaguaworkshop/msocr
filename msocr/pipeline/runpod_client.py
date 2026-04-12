@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +26,8 @@ GPU_TIER_CHOICES = {
     # RunPod's current public REST documentation lists 80 GB A100 variants.
     "a100": ("NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB"),
 }
+
+_SSH_PORT_KEYS = ("22/tcp", "22", "tcp/22")
 
 
 def _slug(value: str) -> str:
@@ -45,6 +49,30 @@ def _default_training_backend(language: str, writing_mode: str) -> str:
     if writing_mode == "printed" and language == "syriac":
         return "tesstrain"
     return "kraken"
+
+
+def _ssh_transport(port: int, ssh_key_path: Optional[Path]) -> str:
+    command = [
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-p",
+        str(port),
+    ]
+    if ssh_key_path is not None:
+        command.extend(["-i", str(ssh_key_path)])
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def _resolve_ssh_port(port_mappings: Dict[str, int]) -> int:
+    for key in _SSH_PORT_KEYS:
+        if key in port_mappings:
+            return int(port_mappings[key])
+    raise RuntimeError(
+        "RunPod pod does not expose TCP port 22. Enable SSH/public IP access before retrieving artifacts."
+    )
 
 
 def recommend_gpu_tier(*, corpus_size: int, training_backend: str) -> str:
@@ -146,6 +174,30 @@ class RunPodTrainingJob:
 
 
 @dataclass(frozen=True)
+class RunPodModelRetrieval:
+    """rsync-based model retrieval plan for a running RunPod pod."""
+
+    pod_id: str
+    public_ip: str
+    ssh_port: int
+    remote_path: str
+    local_path: Path
+    ssh_user: str = "root"
+    ssh_key_path: Optional[Path] = None
+
+    def to_rsync_command(self) -> list[str]:
+        source = f"{self.ssh_user}@{self.public_ip}:{self.remote_path}"
+        return [
+            "rsync",
+            "-avzP",
+            "-e",
+            _ssh_transport(self.ssh_port, self.ssh_key_path),
+            source,
+            str(self.local_path),
+        ]
+
+
+@dataclass(frozen=True)
 class RunPodPod:
     """Normalized RunPod pod response."""
 
@@ -240,6 +292,73 @@ class RunPodClient:
     def delete_pod(self, pod_id: str) -> Dict[str, Any]:
         return self._request("DELETE", f"/pods/{pod_id}")
 
+    def build_model_retrieval(
+        self,
+        *,
+        pod: RunPodPod,
+        remote_path: str,
+        local_path: Path,
+        ssh_key_path: Optional[Path],
+    ) -> RunPodModelRetrieval:
+        if not pod.public_ip:
+            raise RuntimeError(
+                "RunPod pod does not have a public IP. Enable SSH/public IP access before retrieving artifacts."
+            )
+        if ssh_key_path is not None and not ssh_key_path.exists():
+            raise RuntimeError(f"RunPod SSH key not found: {ssh_key_path}")
+        return RunPodModelRetrieval(
+            pod_id=pod.pod_id,
+            public_ip=pod.public_ip,
+            ssh_port=_resolve_ssh_port(pod.port_mappings),
+            remote_path=remote_path,
+            local_path=local_path,
+            ssh_key_path=ssh_key_path,
+        )
+
+    def retrieve_model(
+        self,
+        *,
+        pod: RunPodPod,
+        remote_path: str,
+        local_path: Path,
+        ssh_key_path: Optional[Path],
+        timeout_sec: int = 1800,
+        poll_interval_sec: int = 15,
+    ) -> Path:
+        if shutil.which("rsync") is None:
+            raise RuntimeError("rsync is required to retrieve model artifacts from RunPod.")
+
+        retrieval = self.build_model_retrieval(
+            pod=pod,
+            remote_path=remote_path,
+            local_path=local_path,
+            ssh_key_path=ssh_key_path,
+        )
+        retrieval.local_path.parent.mkdir(parents=True, exist_ok=True)
+
+        deadline = time.time() + timeout_sec
+        last_error: Optional[str] = None
+        while True:
+            completed = subprocess.run(
+                retrieval.to_rsync_command(),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if completed.returncode == 0 and retrieval.local_path.exists():
+                return retrieval.local_path
+
+            output = (completed.stderr or completed.stdout or "").strip()
+            if output:
+                last_error = output
+            if time.time() >= deadline:
+                detail = f" Last rsync output: {last_error}" if last_error else ""
+                raise TimeoutError(
+                    "Timed out waiting for RunPod model artifact at "
+                    f"{remote_path} from pod {pod.pod_id}.{detail}"
+                )
+            time.sleep(poll_interval_sec)
+
     def wait_for_status(
         self,
         pod_id: str,
@@ -290,6 +409,8 @@ def build_training_job(
     network_volume_id: Optional[str] = None,
     container_registry_auth_id: Optional[str] = None,
     data_center_ids: Iterable[str] = (),
+    enable_ssh: bool = False,
+    ssh_public_key: Optional[str] = None,
 ) -> RunPodTrainingJob:
     normalized_language = normalize_language_code(language)
     normalized_writing_mode = _slug(writing_mode)
@@ -330,6 +451,8 @@ def build_training_job(
     }
     if config_path is not None:
         env["MSOCR_CONFIG_PATH"] = str(config_path)
+    if enable_ssh and ssh_public_key:
+        env["SSH_PUBLIC_KEY"] = ssh_public_key.strip()
 
     return RunPodTrainingJob(
         name=pod_name,
@@ -340,6 +463,8 @@ def build_training_job(
         container_disk_in_gb=container_disk_in_gb,
         volume_in_gb=volume_in_gb,
         interruptible=interruptible,
+        support_public_ip=enable_ssh,
+        ports=("22/tcp",) if enable_ssh else (),
         network_volume_id=network_volume_id,
         container_registry_auth_id=container_registry_auth_id,
         data_center_ids=tuple(data_center_ids),

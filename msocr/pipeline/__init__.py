@@ -3,6 +3,7 @@
 from .har_client import HARArtifactBundle, HARClient, HARFileUpload, build_model_artifact_name
 from .runpod_client import (
     RunPodClient,
+    RunPodModelRetrieval,
     RunPodPod,
     RunPodTrainingJob,
     build_training_job,
@@ -15,6 +16,7 @@ __all__ = [
     "HARClient",
     "HARFileUpload",
     "RunPodClient",
+    "RunPodModelRetrieval",
     "RunPodPod",
     "RunPodTrainingJob",
     "build_model_artifact_name",

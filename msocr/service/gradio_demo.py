@@ -10,7 +10,11 @@ import gradio as gr
 from PIL import Image
 
 from msocr.language_registry import DEMO_LANGUAGE_CODES
-from msocr.service.runtime import run_htr_service, run_printed_service
+from msocr.service.runtime import (
+    prefetch_printed_runtime_model_from_env,
+    run_htr_service,
+    run_printed_service,
+)
 
 LANGUAGES = list(DEMO_LANGUAGE_CODES)
 
@@ -84,6 +88,7 @@ def _demo_htr(
 
 
 def build_demo() -> gr.Blocks:
+    prefetch_printed_runtime_model_from_env()
     with gr.Blocks(title="msocr Demo") as demo:
         gr.Markdown("# msocr Demo\nPrinted OCR and Handwritten HTR quick test UI.")
 

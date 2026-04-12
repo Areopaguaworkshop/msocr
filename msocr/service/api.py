@@ -12,7 +12,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from msocr.service.runtime import run_htr_service, run_printed_service
+from msocr.service.runtime import (
+    prefetch_printed_runtime_model_from_env,
+    run_htr_service,
+    run_printed_service,
+)
 
 app = FastAPI(
     title="msocr API",
@@ -108,6 +112,12 @@ def _extract_upload_file(form: Any) -> UploadFile | None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "service": "msocr-api"}
+
+
+@app.on_event("startup")
+def prefetch_runtime_models() -> None:
+    # Production deployments can point the printed route at a HAR-backed artifact.
+    prefetch_printed_runtime_model_from_env()
 
 
 @app.post("/ocr")

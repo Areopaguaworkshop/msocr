@@ -63,15 +63,30 @@ class HARClient:
         executable: str = "hc",
         pkg_url: str = DEFAULT_PKG_URL,
         harness_api_key: Optional[str] = None,
+        harness_api_token: Optional[str] = None,
+        account_id: Optional[str] = None,
+        org_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        api_url: Optional[str] = None,
     ) -> None:
         self.executable = executable
         self.pkg_url = pkg_url.rstrip("/")
-        self.harness_api_key = harness_api_key or os.getenv("HARNESS_API_KEY")
+        self.harness_api_token = (
+            harness_api_token
+            or harness_api_key
+            or os.getenv("HARNESS_API_TOKEN")
+            or os.getenv("HARNESS_API_KEY")
+        )
+        self.account_id = account_id or os.getenv("HARNESS_ACCOUNT_ID")
+        self.org_id = org_id or os.getenv("HARNESS_ORG_ID")
+        self.project_id = project_id or os.getenv("HARNESS_PROJECT_ID")
+        self.api_url = api_url or os.getenv("HARNESS_API_URL")
 
     def _command_env(self) -> Dict[str, str]:
         env = os.environ.copy()
-        if self.harness_api_key:
-            env["HARNESS_API_KEY"] = self.harness_api_key
+        if self.harness_api_token:
+            env["HARNESS_API_TOKEN"] = self.harness_api_token
+            env.setdefault("HARNESS_API_KEY", self.harness_api_token)
         return env
 
     def _ensure_cli(self) -> None:
@@ -79,6 +94,45 @@ class HARClient:
             raise RuntimeError(
                 f"Harness CLI executable not found: {self.executable}. Install `hc` to publish HAR artifacts."
             )
+
+    def _context_flags(self) -> list[str]:
+        flags: list[str] = []
+        if self.api_url:
+            flags.extend(["--api-url", self.api_url])
+        if self.account_id:
+            flags.extend(["--account", self.account_id])
+        if self.org_id:
+            flags.extend(["--org", self.org_id])
+        if self.project_id:
+            flags.extend(["--project", self.project_id])
+        return flags
+
+    def build_login_command(self, *, redacted: bool = False) -> Optional[list[str]]:
+        if not self.harness_api_token:
+            return None
+        token = "$HARNESS_API_TOKEN" if redacted else self.harness_api_token
+        return [
+            self.executable,
+            "auth",
+            "login",
+            "--api-token",
+            token,
+            *self._context_flags(),
+            "--non-interactive",
+        ]
+
+    def _authenticate_if_configured(self, env: Dict[str, str]) -> None:
+        command = self.build_login_command(redacted=False)
+        if command is None:
+            return
+        try:
+            subprocess.run(command, check=True, env=env, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or "").strip()
+            message = "Harness CLI authentication failed before artifact publication."
+            if detail:
+                message = f"{message} {detail}"
+            raise RuntimeError(message) from exc
 
     def build_push_command(self, bundle: HARArtifactBundle, upload: HARFileUpload) -> list[str]:
         command = [
@@ -103,6 +157,29 @@ class HARClient:
             command.extend(["--description", bundle.description])
         return command
 
+    def build_pull_command(
+        self,
+        *,
+        registry: str,
+        package_name: str,
+        version: str,
+        filename: str,
+        destination: Path,
+        pkg_url: Optional[str] = None,
+    ) -> list[str]:
+        package_path = f"{package_name}/{version}/{filename}"
+        return [
+            self.executable,
+            "artifact",
+            "pull",
+            "generic",
+            registry,
+            package_path,
+            str(destination),
+            "--pkg-url",
+            (pkg_url or self.pkg_url).rstrip("/"),
+        ]
+
     def build_metadata_command(self, bundle: HARArtifactBundle) -> Optional[list[str]]:
         if not bundle.metadata:
             return None
@@ -123,7 +200,11 @@ class HARClient:
         ]
 
     def plan_commands(self, bundle: HARArtifactBundle) -> list[list[str]]:
-        commands = [self.build_push_command(bundle, upload) for upload in bundle.files]
+        commands: list[list[str]] = []
+        login_command = self.build_login_command(redacted=True)
+        if login_command is not None:
+            commands.append(login_command)
+        commands.extend(self.build_push_command(bundle, upload) for upload in bundle.files)
         metadata_command = self.build_metadata_command(bundle)
         if metadata_command is not None:
             commands.append(metadata_command)
@@ -132,13 +213,56 @@ class HARClient:
     def publish_bundle(self, bundle: HARArtifactBundle) -> None:
         self._ensure_cli()
         env = self._command_env()
-        for command in self.plan_commands(bundle):
+        self._authenticate_if_configured(env)
+        commands = [self.build_push_command(bundle, upload) for upload in bundle.files]
+        metadata_command = self.build_metadata_command(bundle)
+        if metadata_command is not None:
+            commands.append(metadata_command)
+        for command in commands:
             try:
                 subprocess.run(command, check=True, env=env)
             except subprocess.CalledProcessError as exc:
                 raise RuntimeError(
                     f"Harness artifact command failed: {' '.join(command)}"
                 ) from exc
+
+    def pull_file(
+        self,
+        *,
+        registry: str,
+        package_name: str,
+        version: str,
+        filename: str,
+        destination: Path,
+        pkg_url: Optional[str] = None,
+        force: bool = False,
+    ) -> Path:
+        if destination.exists() and not force:
+            return destination
+
+        self._ensure_cli()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        env = self._command_env()
+        self._authenticate_if_configured(env)
+        command = self.build_pull_command(
+            registry=registry,
+            package_name=package_name,
+            version=version,
+            filename=filename,
+            destination=destination,
+            pkg_url=pkg_url,
+        )
+        try:
+            subprocess.run(command, check=True, env=env)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Harness artifact pull command failed: {' '.join(command)}"
+            ) from exc
+        if not destination.exists():
+            raise RuntimeError(
+                f"Harness artifact pull did not produce the expected file: {destination}"
+            )
+        return destination
 
 
 def build_bundle(

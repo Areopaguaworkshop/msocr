@@ -1013,6 +1013,37 @@ def har_publish(
     help="Local trained model artifact to benchmark and publish (.mlmodel or .traineddata)",
 )
 @click.option(
+    "--runpod-model-path",
+    default="",
+    help="Remote model artifact path on the RunPod /workspace volume to retrieve when --model-file is not provided",
+)
+@click.option(
+    "--runpod-ssh-key",
+    type=click.Path(path_type=Path, exists=True),
+    envvar="RUNPOD_SSH_KEY_PATH",
+    help="Private SSH key used for rsync-based RunPod model retrieval",
+)
+@click.option(
+    "--runpod-ssh-public-key",
+    envvar="RUNPOD_SSH_PUBLIC_KEY",
+    default="",
+    help="Optional SSH public key injected into the pod as SSH_PUBLIC_KEY for automated retrieval",
+)
+@click.option(
+    "--runpod-retrieve-timeout-sec",
+    default=1800,
+    show_default=True,
+    type=int,
+    help="Maximum seconds to wait for the remote RunPod model artifact to become retrievable",
+)
+@click.option(
+    "--runpod-retrieve-poll-sec",
+    default=15,
+    show_default=True,
+    type=int,
+    help="Polling interval in seconds while retrying RunPod model retrieval",
+)
+@click.option(
     "--registry",
     default="",
     help="Harness Artifact Registry name used for promotion",
@@ -1117,6 +1148,12 @@ def har_publish(
     help="Artifact metadata entry in KEY=VALUE form. Repeat as needed.",
 )
 @click.option(
+    "--notification-url",
+    envvar="MSOCR_NOTIFICATION_URL",
+    default="",
+    help="Optional webhook URL that receives the final pipeline notification payload",
+)
+@click.option(
     "--command",
     default="",
     help="Override the generated RunPod container command passed to bash -lc",
@@ -1124,7 +1161,7 @@ def har_publish(
 @click.option(
     "--wait",
     is_flag=True,
-    help="When used with --execute, poll the submitted RunPod pod until it reaches RUNNING",
+    help="When used with --execute, poll the submitted RunPod pod until it reaches RUNNING; retrieval enables this automatically",
 )
 @click.option(
     "--execute",
@@ -1146,6 +1183,11 @@ def pipeline_submit(
     sequence_id,
     model_version,
     model_file,
+    runpod_model_path,
+    runpod_ssh_key,
+    runpod_ssh_public_key,
+    runpod_retrieve_timeout_sec,
+    runpod_retrieve_poll_sec,
     registry,
     pkg_url,
     training_image,
@@ -1164,6 +1206,7 @@ def pipeline_submit(
     cer_threshold,
     description,
     metadata,
+    notification_url,
     command,
     wait,
     execute,
@@ -1207,6 +1250,11 @@ def pipeline_submit(
             sequence_id=sequence_id.strip() or None,
             model_version=model_version,
             model_file=model_file,
+            runpod_model_path=runpod_model_path.strip() or None,
+            runpod_ssh_key_path=runpod_ssh_key,
+            runpod_ssh_public_key=runpod_ssh_public_key.strip() or None,
+            runpod_retrieve_timeout_sec=runpod_retrieve_timeout_sec,
+            runpod_retrieve_poll_interval_sec=runpod_retrieve_poll_sec,
             registry=registry.strip() or None,
             training_image=training_image,
             gpu_tier=gpu_tier.lower(),
@@ -1225,6 +1273,7 @@ def pipeline_submit(
             pkg_url=pkg_url,
             description=description.strip() or None,
             metadata=metadata_map,
+            notification_url=notification_url.strip() or None,
             command=command.strip() or None,
             wait_for_runpod=wait,
             execute=execute,
@@ -1241,9 +1290,9 @@ def pipeline_submit(
 @click.option("--reload", is_flag=True, help="Enable auto-reload for development")
 def serve_api(host, port, reload):
     """Run FastAPI backend service."""
-    import uvicorn
+    from msocr.service.deploy import run_api_server
 
-    uvicorn.run("msocr.service.api:app", host=host, port=port, reload=reload)
+    run_api_server(host=host, port=port, reload=reload)
 
 
 @main.command(name="annotation-api")
@@ -1274,10 +1323,107 @@ def serve_annotation_api(host, port, base_dir):
 )
 def demo_gradio(host, port, share):
     """Run Gradio browser demo."""
-    from msocr.service.gradio_demo import build_demo
+    from msocr.service.deploy import run_demo_server
 
-    demo = build_demo()
-    demo.launch(server_name=host, server_port=port, share=share)
+    run_demo_server(host=host, port=port, share=share)
+
+
+@main.command(name="runtime-smoke-check")
+@click.option("--lang", required=True, type=LANG_CHOICES, help="Printed OCR language")
+@click.option(
+    "--variant",
+    default="default",
+    show_default=True,
+    help="Script variant used for runtime route selection",
+)
+@click.option(
+    "--image",
+    type=click.Path(path_type=Path, exists=True),
+    help=(
+        "Optional image path to run an end-to-end printed OCR smoke check. "
+        "When --base-url is set and --image is omitted, the canonical runtime smoke image is used."
+    ),
+)
+@click.option(
+    "--engine",
+    type=click.Choice(["auto", "kraken", "tesseract", "ocrmypdf"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Printed OCR engine to use when --image is provided",
+)
+@click.option("--device", default="cpu", show_default=True, help="Inference device")
+@click.option(
+    "--reference-text",
+    type=click.Path(path_type=Path, exists=True),
+    help="Optional reference text used for CER-gated printed routing during smoke tests",
+)
+@click.option(
+    "--cer-threshold",
+    default=0.05,
+    show_default=True,
+    type=float,
+    help="CER threshold used during the printed OCR smoke check",
+)
+@click.option(
+    "--base-url",
+    help="Optional live runtime base URL to probe over HTTP (for example http://127.0.0.1:8000)",
+)
+@click.option(
+    "--timeout",
+    default=120,
+    show_default=True,
+    type=int,
+    help="Overall timeout in seconds when waiting for a live runtime health check or OCR probe",
+)
+@click.option(
+    "--poll-interval",
+    default=3,
+    show_default=True,
+    type=int,
+    help="Polling interval in seconds when waiting for a live runtime health check",
+)
+def runtime_smoke_check_command(
+    lang,
+    variant,
+    image,
+    engine,
+    device,
+    reference_text,
+    cer_threshold,
+    base_url,
+    timeout,
+    poll_interval,
+):
+    """Validate deploy-time runtime model resolution, optionally with an OCR smoke run."""
+    from msocr.service.deploy import runtime_http_smoke_check, runtime_smoke_check
+
+    try:
+        if base_url:
+            payload = runtime_http_smoke_check(
+                base_url=base_url,
+                language=_normalize_lang(lang),
+                script_variant=variant.lower(),
+                image_path=image,
+                engine=engine.lower(),
+                device=device,
+                reference_text_path=str(reference_text) if reference_text else None,
+                cer_threshold=cer_threshold,
+                timeout_sec=timeout,
+                poll_interval_sec=poll_interval,
+            )
+        else:
+            payload = runtime_smoke_check(
+                language=_normalize_lang(lang),
+                script_variant=variant.lower(),
+                image_path=image,
+                engine=engine.lower(),
+                device=device,
+                reference_text_path=str(reference_text) if reference_text else None,
+                cer_threshold=cer_threshold,
+            )
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    _print_json(payload)
 
 
 @main.command(name="payne-smith")

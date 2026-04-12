@@ -99,6 +99,11 @@ def test_workflow_plan_blocks_promotion_without_benchmark(tmp_path: Path):
         sequence_id="14",
         model_version="v1",
         model_file=model_file,
+        runpod_model_path=None,
+        runpod_ssh_key_path=None,
+        runpod_ssh_public_key=None,
+        runpod_retrieve_timeout_sec=60,
+        runpod_retrieve_poll_interval_sec=1,
         registry="msocr-models",
         training_image="runpod/pytorch:demo",
         gpu_tier="auto",
@@ -117,6 +122,7 @@ def test_workflow_plan_blocks_promotion_without_benchmark(tmp_path: Path):
         pkg_url="https://pkg.harness.io",
         description=None,
         metadata={},
+        notification_url=None,
         command=None,
         wait_for_runpod=False,
         execute=False,
@@ -126,12 +132,64 @@ def test_workflow_plan_blocks_promotion_without_benchmark(tmp_path: Path):
     assert plan["stages"]["har_publish"]["reason"] == "benchmark_manifest_required_before_promotion"
 
 
-def test_workflow_execute_runs_benchmark_and_publishes(monkeypatch, tmp_path: Path):
+def test_workflow_plan_blocks_benchmark_without_any_model_artifact(tmp_path: Path):
     train_manifest = _write_train_manifest(tmp_path)
     benchmark_manifest = _write_benchmark_manifest(tmp_path)
-    model_file = tmp_path / "model.traineddata"
+
+    plan = run_training_promotion_workflow(
+        train_manifest_ref=train_manifest,
+        benchmark_manifest_ref=benchmark_manifest,
+        language="syriac",
+        script_variant="estrangela",
+        writing_mode="printed",
+        mode="ocr",
+        trainer="tesstrain",
+        config_path=None,
+        pipeline_run_id="run-blocked",
+        sequence_id="15",
+        model_version="v1",
+        model_file=None,
+        runpod_model_path=None,
+        runpod_ssh_key_path=None,
+        runpod_ssh_public_key=None,
+        runpod_retrieve_timeout_sec=60,
+        runpod_retrieve_poll_interval_sec=1,
+        registry="msocr-models",
+        training_image="runpod/pytorch:demo",
+        gpu_tier="auto",
+        volume_in_gb=20,
+        container_disk_in_gb=50,
+        interruptible=False,
+        network_volume_id=None,
+        container_registry_auth_id=None,
+        data_center_ids=(),
+        dockerfile_path=None,
+        output_dir=tmp_path / "output",
+        cer_threshold=None,
+        benchmark_id=None,
+        model_id=None,
+        preprocessing_profile="default",
+        pkg_url="https://pkg.harness.io",
+        description=None,
+        metadata={},
+        notification_url=None,
+        command=None,
+        wait_for_runpod=False,
+        execute=False,
+    )
+
+    assert plan["stages"]["benchmark"]["status"] == "blocked"
+    assert plan["stages"]["benchmark"]["reason"] == "model_artifact_required_for_benchmark"
+    assert plan["stages"]["har_publish"]["status"] == "blocked"
+    assert plan["stages"]["har_publish"]["reason"] == "model_artifact_required_before_promotion"
+
+
+def test_workflow_execute_retrieves_model_runs_benchmark_and_publishes(monkeypatch, tmp_path: Path):
+    train_manifest = _write_train_manifest(tmp_path)
+    benchmark_manifest = _write_benchmark_manifest(tmp_path)
     dockerfile = tmp_path / "Dockerfile"
-    model_file.write_text("trained-model", encoding="utf-8")
+    ssh_key = tmp_path / "id_ed25519"
+    ssh_key.write_text("private-key", encoding="utf-8")
     dockerfile.write_text("FROM ubuntu:22.04\n", encoding="utf-8")
 
     class FakeRunPodClient:
@@ -143,10 +201,22 @@ def test_workflow_execute_runs_benchmark_and_publishes(monkeypatch, tmp_path: Pa
                     "pod_id": "pod-123",
                     "name": job.name,
                     "desired_status": "RUNNING",
-                    "public_ip": None,
-                    "port_mappings": {},
+                    "public_ip": "203.0.113.10",
+                    "port_mappings": {"22/tcp": 17445},
                 },
             )()
+
+        def wait_for_status(self, pod_id):
+            assert pod_id == "pod-123"
+            return self.create_pod(type("Job", (), {"name": "msocr-syr-estrangela-printed-run-2"})())
+
+        def retrieve_model(self, *, pod, remote_path, local_path, ssh_key_path, timeout_sec, poll_interval_sec):
+            assert pod.public_ip == "203.0.113.10"
+            assert remote_path == "/workspace/output/model.traineddata"
+            assert ssh_key_path == ssh_key
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text("trained-model", encoding="utf-8")
+            return local_path
 
     published = {}
 
@@ -186,7 +256,12 @@ def test_workflow_execute_runs_benchmark_and_publishes(monkeypatch, tmp_path: Pa
         pipeline_run_id="run-2",
         sequence_id="14",
         model_version="v1",
-        model_file=model_file,
+        model_file=None,
+        runpod_model_path="/workspace/output/model.traineddata",
+        runpod_ssh_key_path=ssh_key,
+        runpod_ssh_public_key="ssh-ed25519 AAAATEST runpod",
+        runpod_retrieve_timeout_sec=60,
+        runpod_retrieve_poll_interval_sec=1,
         registry="msocr-models",
         training_image="runpod/pytorch:demo",
         gpu_tier="auto",
@@ -205,16 +280,22 @@ def test_workflow_execute_runs_benchmark_and_publishes(monkeypatch, tmp_path: Pa
         pkg_url="https://pkg.harness.io",
         description=None,
         metadata={"stage": "staging"},
+        notification_url=None,
         command=None,
         wait_for_runpod=False,
         execute=True,
     )
 
-    assert result["stages"]["runpod"]["status"] == "submitted"
+    assert result["stages"]["runpod"]["status"] == "running"
+    assert result["stages"]["model_retrieval"]["status"] == "completed"
     assert result["stages"]["benchmark"]["status"] == "completed"
     assert result["stages"]["policy_gate"]["pass_fail"] is True
     assert result["stages"]["har_publish"]["status"] == "completed"
+    assert result["notification_event"] == "artifact_promoted"
     assert published["artifact_ref"] == "syr-estrangela-printed:v14"
     assert "sidecars/metrics.json" in published["files"]
     assert "sidecars/Dockerfile.sha" in published["files"]
     assert Path(result["dockerfile_sha_path"]).exists()
+    assert Path(result["model_file"]).exists()
+    assert Path(result["state_path"]).exists()
+    assert Path(result["notification_path"]).exists()
