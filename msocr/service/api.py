@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from msocr.service.runtime import (
+    prefetch_htr_runtime_model_from_env,
     prefetch_printed_runtime_model_from_env,
     run_htr_service,
     run_printed_service,
@@ -67,6 +68,10 @@ class HTRRequest(BaseModel):
     model: Optional[str] = Field(
         default=None, description="Optional model path override"
     )
+    variant: str = Field(
+        default="default",
+        description="Script variant used for handwritten runtime model selection",
+    )
     provider: Literal["auto", "kraken", "transkribus"] = "auto"
     device: str = "cpu"
 
@@ -116,8 +121,9 @@ def health() -> dict:
 
 @app.on_event("startup")
 def prefetch_runtime_models() -> None:
-    # Production deployments can point the printed route at a HAR-backed artifact.
+    # Production deployments can point printed and handwritten routes at HAR-backed artifacts.
     prefetch_printed_runtime_model_from_env()
+    prefetch_htr_runtime_model_from_env()
 
 
 @app.post("/ocr")
@@ -169,23 +175,64 @@ async def ocr(request: Request) -> dict:
 
 
 @app.post("/htr")
-def htr(request: HTRRequest) -> dict:
-    image = Path(request.image_path)
-    if not image.exists():
-        raise HTTPException(status_code=400, detail=f"Image not found: {image}")
-
-    if request.model and not Path(request.model).exists():
-        raise HTTPException(status_code=400, detail=f"Model not found: {request.model}")
+async def htr(request: Request) -> dict:
+    content_type = request.headers.get("content-type", "").lower()
+    temp_image_path: Path | None = None
 
     try:
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            upload = _extract_upload_file(form)
+            if upload is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Missing uploaded file in multipart payload. "
+                        "Provide a file field such as 'file' or 'image'."
+                    ),
+                )
+
+            suffix = Path(upload.filename or "").suffix or ".bin"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(await upload.read())
+                temp_image_path = Path(tmp.name)
+
+            raw_payload: dict[str, Any] = {
+                "image_path": str(temp_image_path),
+                "lang": form.get("lang"),
+                "model": form.get("model"),
+                "variant": form.get("variant"),
+                "provider": form.get("provider"),
+                "device": form.get("device"),
+            }
+            payload = {k: v for k, v in raw_payload.items() if v not in (None, "")}
+            htr_request = HTRRequest.model_validate(payload)
+        else:
+            body = await request.json()
+            htr_request = HTRRequest.model_validate(body)
+
+        image = Path(htr_request.image_path)
+        if not image.exists():
+            raise HTTPException(status_code=400, detail=f"Image not found: {image}")
+
+        if htr_request.model and not Path(htr_request.model).exists():
+            raise HTTPException(status_code=400, detail=f"Model not found: {htr_request.model}")
+
         result = run_htr_service(
-            lang=request.lang,
+            lang=htr_request.lang,
             image_path=image,
-            model=request.model,
-            provider=request.provider,
-            device=request.device,
+            model=htr_request.model,
+            provider=htr_request.provider,
+            variant=htr_request.variant,
+            device=htr_request.device,
         )
+    except ValidationError as exc:
+        detail = _sanitize_validation_payload(exc.errors())
+        raise HTTPException(status_code=422, detail=detail) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if temp_image_path is not None:
+            temp_image_path.unlink(missing_ok=True)
 
     return {"ok": True, **result}

@@ -15,8 +15,16 @@ from msocr.pipelines.printed_ocr import run_printed_ocr
 DEFAULT_RUNTIME_MODEL_CACHE_DIR = Path("models/runtime")
 
 
-def _runtime_override_path() -> Optional[Path]:
-    raw_path = os.getenv("MSOCR_RUNTIME_MODEL_PATH", "").strip()
+def _env_value(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _override_path(*env_names: str) -> Optional[Path]:
+    raw_path = _env_value(*env_names)
     if not raw_path:
         return None
     model_path = Path(raw_path)
@@ -25,13 +33,30 @@ def _runtime_override_path() -> Optional[Path]:
     return model_path
 
 
-def _runtime_har_settings() -> Optional[Dict[str, str]]:
+def _printed_runtime_override_path() -> Optional[Path]:
+    return _override_path("MSOCR_PRINTED_RUNTIME_MODEL_PATH", "MSOCR_RUNTIME_MODEL_PATH")
+
+
+def _htr_runtime_override_path() -> Optional[Path]:
+    return _override_path("MSOCR_HTR_RUNTIME_MODEL_PATH")
+
+
+def _runtime_har_settings(
+    *,
+    registry_env_names: tuple[str, ...],
+    version_env_names: tuple[str, ...],
+    filename_env_names: tuple[str, ...],
+    package_env_names: tuple[str, ...],
+    pkg_url_env_names: tuple[str, ...],
+    cache_dir_env_names: tuple[str, ...],
+) -> Optional[Dict[str, str]]:
     keys = {
-        "registry": os.getenv("MSOCR_RUNTIME_HAR_REGISTRY", "").strip(),
-        "version": os.getenv("MSOCR_RUNTIME_HAR_VERSION", "").strip(),
-        "filename": os.getenv("MSOCR_RUNTIME_HAR_FILENAME", "").strip(),
-        "package": os.getenv("MSOCR_RUNTIME_HAR_PACKAGE", "").strip(),
-        "pkg_url": os.getenv("MSOCR_RUNTIME_HAR_PKG_URL", "").strip(),
+        "registry": _env_value(*registry_env_names),
+        "version": _env_value(*version_env_names),
+        "filename": _env_value(*filename_env_names),
+        "package": _env_value(*package_env_names),
+        "pkg_url": _env_value(*pkg_url_env_names),
+        "cache_dir": _env_value(*cache_dir_env_names),
     }
     if not any(keys.values()):
         return None
@@ -41,6 +66,28 @@ def _runtime_har_settings() -> Optional[Dict[str, str]]:
             "MSOCR_RUNTIME_HAR_VERSION, and MSOCR_RUNTIME_HAR_FILENAME."
         )
     return keys
+
+
+def _printed_runtime_har_settings() -> Optional[Dict[str, str]]:
+    return _runtime_har_settings(
+        registry_env_names=("MSOCR_PRINTED_RUNTIME_HAR_REGISTRY", "MSOCR_RUNTIME_HAR_REGISTRY"),
+        version_env_names=("MSOCR_PRINTED_RUNTIME_HAR_VERSION", "MSOCR_RUNTIME_HAR_VERSION"),
+        filename_env_names=("MSOCR_PRINTED_RUNTIME_HAR_FILENAME", "MSOCR_RUNTIME_HAR_FILENAME"),
+        package_env_names=("MSOCR_PRINTED_RUNTIME_HAR_PACKAGE", "MSOCR_RUNTIME_HAR_PACKAGE"),
+        pkg_url_env_names=("MSOCR_PRINTED_RUNTIME_HAR_PKG_URL", "MSOCR_RUNTIME_HAR_PKG_URL"),
+        cache_dir_env_names=("MSOCR_PRINTED_RUNTIME_HAR_CACHE_DIR", "MSOCR_RUNTIME_HAR_CACHE_DIR"),
+    )
+
+
+def _htr_runtime_har_settings() -> Optional[Dict[str, str]]:
+    return _runtime_har_settings(
+        registry_env_names=("MSOCR_HTR_RUNTIME_HAR_REGISTRY",),
+        version_env_names=("MSOCR_HTR_RUNTIME_HAR_VERSION",),
+        filename_env_names=("MSOCR_HTR_RUNTIME_HAR_FILENAME",),
+        package_env_names=("MSOCR_HTR_RUNTIME_HAR_PACKAGE",),
+        pkg_url_env_names=("MSOCR_HTR_RUNTIME_HAR_PKG_URL",),
+        cache_dir_env_names=("MSOCR_HTR_RUNTIME_HAR_CACHE_DIR", "MSOCR_RUNTIME_HAR_CACHE_DIR"),
+    )
 
 
 def _resolve_runtime_package_name(
@@ -55,8 +102,8 @@ def _resolve_runtime_package_name(
     return build_model_artifact_name(language, script_variant, writing_mode)
 
 
-def _runtime_cache_dir() -> Path:
-    raw_path = os.getenv("MSOCR_RUNTIME_HAR_CACHE_DIR", "").strip()
+def _runtime_cache_dir(settings: Dict[str, str]) -> Path:
+    raw_path = settings.get("cache_dir", "").strip()
     return Path(raw_path) if raw_path else DEFAULT_RUNTIME_MODEL_CACHE_DIR
 
 
@@ -65,17 +112,15 @@ def _pull_runtime_model_from_har(
     language: str,
     script_variant: str,
     writing_mode: str,
+    settings: Dict[str, str],
 ) -> Optional[Path]:
-    settings = _runtime_har_settings()
-    if settings is None:
-        return None
     package_name = _resolve_runtime_package_name(
         language=language,
         script_variant=script_variant,
         writing_mode=writing_mode,
         explicit_package=settings["package"],
     )
-    destination = _runtime_cache_dir() / Path(package_name) / settings["version"] / settings["filename"]
+    destination = _runtime_cache_dir(settings) / Path(package_name) / settings["version"] / settings["filename"]
     client = HARClient(**({"pkg_url": settings["pkg_url"]} if settings["pkg_url"] else {}))
     return client.pull_file(
         registry=settings["registry"],
@@ -95,13 +140,17 @@ def resolve_printed_runtime_model_path(
 ) -> Optional[str]:
     if model:
         return model
-    override_path = _runtime_override_path()
+    override_path = _printed_runtime_override_path()
     if override_path is not None:
         return str(override_path)
+    settings = _printed_runtime_har_settings()
+    if settings is None:
+        return None
     pulled_path = _pull_runtime_model_from_har(
         language=language,
         script_variant=script_variant,
         writing_mode="printed",
+        settings=settings,
     )
     if pulled_path is None:
         return None
@@ -109,10 +158,10 @@ def resolve_printed_runtime_model_path(
 
 
 def prefetch_printed_runtime_model_from_env() -> Optional[Path]:
-    override_path = _runtime_override_path()
+    override_path = _printed_runtime_override_path()
     if override_path is not None:
         return override_path
-    settings = _runtime_har_settings()
+    settings = _printed_runtime_har_settings()
     if settings is None:
         return None
     if settings["package"]:
@@ -120,8 +169,55 @@ def prefetch_printed_runtime_model_from_env() -> Optional[Path]:
             language="syriac",
             script_variant="default",
             writing_mode="printed",
+            settings=settings,
         )
     return None
+
+
+def resolve_htr_runtime_model_path(
+    *,
+    language: str,
+    script_variant: str,
+    model: Optional[str],
+) -> Optional[str]:
+    if model:
+        return model
+    override_path = _htr_runtime_override_path()
+    if override_path is not None:
+        return str(override_path)
+    settings = _htr_runtime_har_settings()
+    if settings is None:
+        return None
+    pulled_path = _pull_runtime_model_from_har(
+        language=language,
+        script_variant=script_variant,
+        writing_mode="handwritten",
+        settings=settings,
+    )
+    if pulled_path is None:
+        return None
+    return str(pulled_path)
+
+
+def prefetch_htr_runtime_model_from_env() -> Optional[Path]:
+    override_path = _htr_runtime_override_path()
+    if override_path is not None:
+        return override_path
+    settings = _htr_runtime_har_settings()
+    if settings is None:
+        return None
+
+    language = _env_value("MSOCR_HTR_RUNTIME_LANG", "MSOCR_HTR_RUNTIME_LANGUAGE")
+    script_variant = _env_value("MSOCR_HTR_RUNTIME_VARIANT") or "default"
+    if not settings["package"] and not language:
+        return None
+
+    return _pull_runtime_model_from_har(
+        language=language or "syriac",
+        script_variant=script_variant,
+        writing_mode="handwritten",
+        settings=settings,
+    )
 
 
 def run_printed_service(
@@ -165,12 +261,18 @@ def run_htr_service(
     image_path: Path,
     model: Optional[str] = None,
     provider: str = "auto",
+    variant: str = "default",
     device: str = "cpu",
 ) -> Dict[str, Any]:
     lang_key = normalize_language_code(lang)
     provider_key = provider.strip().lower()
+    resolved_model = resolve_htr_runtime_model_path(
+        language=lang_key,
+        script_variant=variant,
+        model=model,
+    )
 
-    if lang_key == "syriac" and provider_key in ("auto", "transkribus"):
+    if lang_key == "syriac" and provider_key == "transkribus":
         return {
             "text": (
                 "Syriac handwritten route is configured for Transkribus workflow currently. "
@@ -181,8 +283,19 @@ def run_htr_service(
             "language": lang_key,
         }
 
-    if model:
-        model_path = Path(model)
+    if lang_key == "syriac" and provider_key == "auto" and resolved_model is None:
+        return {
+            "text": (
+                "Syriac handwritten route is configured for Transkribus workflow currently. "
+                "Export/import through Transkribus and then re-ingest results."
+            ),
+            "engine": "transkribus",
+            "mode": "htr",
+            "language": lang_key,
+        }
+
+    if resolved_model:
+        model_path = Path(resolved_model)
     elif lang_key == "latin":
         model_path = Path("models/kraken/latin_handwritten_mccatmus.mlmodel")
     elif lang_key == "greek":

@@ -22,6 +22,7 @@ LANG_CHOICES = click.Choice(
     case_sensitive=False,
 )
 MODE_CHOICES = click.Choice(["ocr", "htr"], case_sensitive=False)
+RUNTIME_SMOKE_MODE_CHOICES = click.Choice(["printed", "handwritten"], case_sensitive=False)
 OUTPUT_FORMAT_CHOICES = click.Choice(
     ["json", "pdf", "markdown"],
     case_sensitive=False,
@@ -341,6 +342,12 @@ def ocr(
     help="Handwritten OCR provider selection",
 )
 @click.option(
+    "--variant",
+    default="default",
+    show_default=True,
+    help="Script variant used for handwritten runtime model selection",
+)
+@click.option(
     "--output-format",
     "-f",
     type=OUTPUT_FORMAT_CHOICES,
@@ -350,7 +357,7 @@ def ocr(
 )
 @click.option("--output", "-o", help="Output path (file or directory)")
 @click.option("--device", default="cpu", show_default=True, help="Inference device")
-def htr(input_path, lang, model, provider, output_format, output, device):
+def htr(input_path, lang, model, provider, variant, output_format, output, device):
     """Run handwritten HTR for image or PDF input."""
     from msocr.service.runtime import run_htr_service
     from msocr.utils.input_loader import expand_input_to_images
@@ -380,6 +387,7 @@ def htr(input_path, lang, model, provider, output_format, output, device):
                     image_path=image_path,
                     model=model,
                     provider=provider_key,
+                    variant=variant,
                     device=device,
                 )
             except Exception as exc:
@@ -405,6 +413,7 @@ def htr(input_path, lang, model, provider, output_format, output, device):
         "pages": page_results,
         "metadata": {
             "input_file": str(input_path),
+            "variant": variant,
         },
     }
 
@@ -1329,7 +1338,14 @@ def demo_gradio(host, port, share):
 
 
 @main.command(name="runtime-smoke-check")
-@click.option("--lang", required=True, type=LANG_CHOICES, help="Printed OCR language")
+@click.option(
+    "--mode",
+    default="printed",
+    show_default=True,
+    type=RUNTIME_SMOKE_MODE_CHOICES,
+    help="Runtime route to validate",
+)
+@click.option("--lang", required=True, type=LANG_CHOICES, help="Runtime language")
 @click.option(
     "--variant",
     default="default",
@@ -1350,6 +1366,13 @@ def demo_gradio(host, port, share):
     default="auto",
     show_default=True,
     help="Printed OCR engine to use when --image is provided",
+)
+@click.option(
+    "--provider",
+    type=click.Choice(["auto", "kraken", "transkribus"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="Handwritten provider to use when --mode handwritten",
 )
 @click.option("--device", default="cpu", show_default=True, help="Inference device")
 @click.option(
@@ -1383,10 +1406,12 @@ def demo_gradio(host, port, share):
     help="Polling interval in seconds when waiting for a live runtime health check",
 )
 def runtime_smoke_check_command(
+    mode,
     lang,
     variant,
     image,
     engine,
+    provider,
     device,
     reference_text,
     cer_threshold,
@@ -1394,11 +1419,37 @@ def runtime_smoke_check_command(
     timeout,
     poll_interval,
 ):
-    """Validate deploy-time runtime model resolution, optionally with an OCR smoke run."""
-    from msocr.service.deploy import runtime_http_smoke_check, runtime_smoke_check
+    """Validate deploy-time runtime model resolution, optionally with a live route smoke run."""
+    from msocr.service.deploy import (
+        runtime_htr_smoke_check,
+        runtime_http_htr_smoke_check,
+        runtime_http_smoke_check,
+        runtime_smoke_check,
+    )
 
     try:
-        if base_url:
+        mode_key = mode.lower()
+        if mode_key == "handwritten":
+            if base_url:
+                payload = runtime_http_htr_smoke_check(
+                    base_url=base_url,
+                    language=_normalize_lang(lang),
+                    script_variant=variant,
+                    image_path=image,
+                    provider=provider.lower(),
+                    device=device,
+                    timeout_sec=timeout,
+                    poll_interval_sec=poll_interval,
+                )
+            else:
+                payload = runtime_htr_smoke_check(
+                    language=_normalize_lang(lang),
+                    script_variant=variant,
+                    image_path=image,
+                    provider=provider.lower(),
+                    device=device,
+                )
+        elif base_url:
             payload = runtime_http_smoke_check(
                 base_url=base_url,
                 language=_normalize_lang(lang),

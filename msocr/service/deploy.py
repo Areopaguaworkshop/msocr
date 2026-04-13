@@ -14,7 +14,12 @@ from urllib import error, request
 import uvicorn
 
 from msocr.language_registry import normalize_language_code
-from msocr.service.runtime import run_printed_service, resolve_printed_runtime_model_path
+from msocr.service.runtime import (
+    resolve_htr_runtime_model_path,
+    resolve_printed_runtime_model_path,
+    run_htr_service,
+    run_printed_service,
+)
 
 
 RUNTIME_SMOKE_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "runtime"
@@ -27,6 +32,16 @@ def _runtime_source(model: Optional[str]) -> str:
     if os.getenv("MSOCR_RUNTIME_MODEL_PATH", "").strip():
         return "env_path"
     if os.getenv("MSOCR_RUNTIME_HAR_REGISTRY", "").strip():
+        return "har"
+    return "default_route"
+
+
+def _htr_runtime_source(model: Optional[str]) -> str:
+    if model:
+        return "explicit"
+    if os.getenv("MSOCR_HTR_RUNTIME_MODEL_PATH", "").strip():
+        return "env_path"
+    if os.getenv("MSOCR_HTR_RUNTIME_HAR_REGISTRY", "").strip():
         return "har"
     return "default_route"
 
@@ -193,6 +208,156 @@ def runtime_http_smoke_check(
     }
 
 
+def runtime_htr_smoke_check(
+    *,
+    language: str,
+    script_variant: str,
+    model: Optional[str] = None,
+    image_path: Optional[Path] = None,
+    provider: str = "auto",
+    device: str = "cpu",
+) -> Dict[str, Any]:
+    normalized_language = normalize_language_code(language)
+    resolved_model = resolve_htr_runtime_model_path(
+        language=normalized_language,
+        script_variant=script_variant,
+        model=model,
+    )
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "mode": "handwritten",
+        "language": normalized_language,
+        "script_variant": script_variant,
+        "runtime_source": _htr_runtime_source(model),
+        "model_path": resolved_model,
+        "provider": provider,
+        "image_path": str(image_path) if image_path is not None else None,
+    }
+    if image_path is None:
+        return payload
+
+    if not image_path.exists():
+        raise FileNotFoundError(f"Runtime smoke image not found: {image_path}")
+
+    result = run_htr_service(
+        lang=normalized_language,
+        image_path=image_path,
+        model=model,
+        provider=provider,
+        variant=script_variant,
+        device=device,
+    )
+    payload["engine"] = result["engine"]
+    payload["text_length"] = len(result["text"])
+    return payload
+
+
+def runtime_http_htr_smoke_check(
+    *,
+    base_url: str,
+    language: str,
+    script_variant: str,
+    image_path: Optional[Path],
+    provider: str = "auto",
+    device: str = "cpu",
+    timeout_sec: int = 120,
+    poll_interval_sec: int = 3,
+) -> Dict[str, Any]:
+    if image_path is None:
+        raise ValueError("Handwritten runtime HTTP smoke check requires an image path.")
+    normalized_language = normalize_language_code(language)
+    if not image_path.exists():
+        raise FileNotFoundError(f"Runtime smoke image not found: {image_path}")
+
+    health_payload = wait_for_runtime_health(
+        base_url=base_url,
+        timeout_sec=timeout_sec,
+        poll_interval_sec=poll_interval_sec,
+    )
+
+    body, content_type = _build_multipart_request(
+        fields={
+            "lang": normalized_language,
+            "variant": script_variant,
+            "provider": provider,
+            "device": device,
+        },
+        file_field="file",
+        file_path=image_path,
+    )
+    htr_url = _build_runtime_url(base_url, "/htr")
+    req = request.Request(
+        htr_url,
+        data=body,
+        headers={"Content-Type": content_type},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=timeout_sec) as response:
+            payload = _decode_json_response(response)
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Runtime HTR smoke request failed: {exc.code} {detail}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"Runtime HTR smoke request failed: {exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Runtime HTR smoke request returned invalid JSON.") from exc
+
+    text = str(payload.get("text", "")).strip()
+    if not payload.get("ok"):
+        raise RuntimeError(f"Runtime HTR smoke request failed: {payload}")
+    if not text:
+        raise RuntimeError("Runtime HTR smoke request returned empty text.")
+
+    return {
+        "ok": True,
+        "base_url": base_url.rstrip("/"),
+        "health": health_payload,
+        "htr": {
+            "engine": payload.get("engine"),
+            "language": payload.get("language", normalized_language),
+            "mode": payload.get("mode", "htr"),
+            "image_path": str(image_path),
+            "text_length": len(text),
+            "text_preview": text[:80],
+        },
+    }
+
+
+def gradio_http_smoke_check(
+    *,
+    base_url: str,
+    expected_text: str = "msocr Demo",
+    timeout_sec: int = 120,
+    poll_interval_sec: int = 3,
+) -> Dict[str, Any]:
+    deadline = time.time() + timeout_sec
+    root_url = _build_runtime_url(base_url, "/")
+    last_error: Optional[str] = None
+
+    while True:
+        try:
+            req = request.Request(root_url, method="GET")
+            with request.urlopen(req, timeout=min(timeout_sec, 10)) as response:
+                html = response.read().decode("utf-8", errors="replace")
+                if expected_text not in html:
+                    raise RuntimeError(
+                        f"Gradio root did not include expected text {expected_text!r}."
+                    )
+                return {
+                    "ok": True,
+                    "base_url": base_url.rstrip("/"),
+                    "expected_text": expected_text,
+                }
+        except (error.HTTPError, error.URLError, RuntimeError) as exc:
+            last_error = str(exc)
+
+        if time.time() >= deadline:
+            detail = f" Last error: {last_error}" if last_error else ""
+            raise TimeoutError(f"Timed out waiting for Gradio at {root_url}.{detail}")
+        time.sleep(poll_interval_sec)
+
+
 def runtime_smoke_check(
     *,
     language: str,
@@ -241,14 +406,24 @@ def runtime_smoke_check(
 
 
 def preflight_runtime_from_env() -> Dict[str, Any]:
+    mode = os.getenv("MSOCR_RUNTIME_SMOKE_MODE", "printed").strip().lower() or "printed"
     language = os.getenv("MSOCR_RUNTIME_SMOKE_LANG", "syriac").strip() or "syriac"
     script_variant = os.getenv("MSOCR_RUNTIME_SMOKE_VARIANT", "default").strip() or "default"
     image_path_raw = os.getenv("MSOCR_RUNTIME_SMOKE_IMAGE", "").strip()
     image_path = Path(image_path_raw) if image_path_raw else None
     engine = os.getenv("MSOCR_RUNTIME_SMOKE_ENGINE", "auto").strip() or "auto"
+    provider = os.getenv("MSOCR_RUNTIME_SMOKE_PROVIDER", "auto").strip() or "auto"
     device = os.getenv("MSOCR_RUNTIME_SMOKE_DEVICE", "cpu").strip() or "cpu"
     reference_text = os.getenv("MSOCR_RUNTIME_SMOKE_REFERENCE_TEXT", "").strip() or None
     cer_threshold_raw = os.getenv("MSOCR_RUNTIME_SMOKE_CER_THRESHOLD", "0.05").strip() or "0.05"
+    if mode == "handwritten":
+        return runtime_htr_smoke_check(
+            language=language,
+            script_variant=script_variant,
+            image_path=image_path,
+            provider=provider,
+            device=device,
+        )
     return runtime_smoke_check(
         language=language,
         script_variant=script_variant,

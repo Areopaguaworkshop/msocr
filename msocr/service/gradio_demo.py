@@ -11,6 +11,7 @@ from PIL import Image
 
 from msocr.language_registry import DEMO_LANGUAGE_CODES
 from msocr.service.runtime import (
+    prefetch_htr_runtime_model_from_env,
     prefetch_printed_runtime_model_from_env,
     run_htr_service,
     run_printed_service,
@@ -65,6 +66,7 @@ def _demo_htr(
     image: Optional[Image.Image],
     lang: str,
     provider: str,
+    variant: str,
     model: str,
     device: str,
 ) -> tuple[str, str]:
@@ -78,6 +80,7 @@ def _demo_htr(
             image_path=image_path,
             model=model_arg,
             provider=provider,
+            variant=variant,
             device=device,
         )
         return result[
@@ -89,6 +92,7 @@ def _demo_htr(
 
 def build_demo() -> gr.Blocks:
     prefetch_printed_runtime_model_from_env()
+    prefetch_htr_runtime_model_from_env()
     with gr.Blocks(title="msocr Demo") as demo:
         gr.Markdown("# msocr Demo\nPrinted OCR and Handwritten HTR quick test UI.")
 
@@ -144,6 +148,7 @@ def build_demo() -> gr.Blocks:
                         value="auto",
                         label="Provider",
                     )
+                    htr_variant = gr.Textbox(value="default", label="Variant")
                     htr_model = gr.Textbox(
                         label="Model Path (optional)", placeholder="models/kraken/..."
                     )
@@ -155,7 +160,7 @@ def build_demo() -> gr.Blocks:
 
             htr_btn.click(
                 _demo_htr,
-                inputs=[htr_image, htr_lang, htr_provider, htr_model, htr_device],
+                inputs=[htr_image, htr_lang, htr_provider, htr_variant, htr_model, htr_device],
                 outputs=[htr_text, htr_info],
             )
 
