@@ -77,15 +77,16 @@ workflow:
     name: register_artifact
     action: |
       Push trained HTR model to HAR as generic artifact.
-      Artifact name pattern: htr-{language}-v{sequenceId}.
+      Artifact name pattern: {lang}-{script_variant}-handwritten-v{sequenceId}.
       Attach metrics.json as artifact sidecar.
       Tag: staging (automatic), production (manual approval gate).
   - step_id: DEP1
     name: deploy
     action: |
       Harness CD pulls model from HAR on FastAPI service startup.
-      Update model registry with new language model.
-      Gradio demo updated to include new language option.
+      API `/htr` route should switch to local Kraken inference when a promoted
+      HAR-backed `.mlmodel` is configured for `provider=auto`.
+      Gradio web deploy should use the same HAR-backed handwritten runtime model.
 metrics:
   primary:
     - CER

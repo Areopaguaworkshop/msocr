@@ -207,7 +207,11 @@ def prefetch_htr_runtime_model_from_env() -> Optional[Path]:
     if settings is None:
         return None
 
-    language = _env_value("MSOCR_HTR_RUNTIME_LANG", "MSOCR_HTR_RUNTIME_LANGUAGE")
+    language = _env_value(
+        "MSOCR_HTR_RUNTIME_LANG",
+        "MSOCR_HTR_RUNTIME_LANGUAGE",
+        "MSOCR_HTR_RUNTIME_HAR_LANG",
+    )
     script_variant = _env_value("MSOCR_HTR_RUNTIME_VARIANT") or "default"
     if not settings["package"] and not language:
         return None

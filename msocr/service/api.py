@@ -229,6 +229,8 @@ async def htr(request: Request) -> dict:
     except ValidationError as exc:
         detail = _sanitize_validation_payload(exc.errors())
         raise HTTPException(status_code=422, detail=detail) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:

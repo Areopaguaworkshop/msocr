@@ -7,6 +7,7 @@ from msocr.pipeline.har_client import HARClient, build_bundle, build_model_artif
 
 def test_build_model_artifact_name_uses_iso_language_token():
     assert build_model_artifact_name("syriac", "estrangela", "printed") == "syr-estrangela-printed"
+    assert build_model_artifact_name("syriac", "default", "handwritten") == "syr-default-handwritten"
 
 
 def test_build_bundle_includes_sidecar_paths(monkeypatch, tmp_path: Path):

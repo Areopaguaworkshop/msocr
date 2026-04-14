@@ -1405,6 +1405,10 @@ def demo_gradio(host, port, share):
     type=int,
     help="Polling interval in seconds when waiting for a live runtime health check",
 )
+@click.option(
+    "--require-engine",
+    help="Optional engine name that the smoke response must report",
+)
 def runtime_smoke_check_command(
     mode,
     lang,
@@ -1418,6 +1422,7 @@ def runtime_smoke_check_command(
     base_url,
     timeout,
     poll_interval,
+    require_engine,
 ):
     """Validate deploy-time runtime model resolution, optionally with a live route smoke run."""
     from msocr.service.deploy import (
@@ -1472,6 +1477,16 @@ def runtime_smoke_check_command(
                 reference_text_path=str(reference_text) if reference_text else None,
                 cer_threshold=cer_threshold,
             )
+        if require_engine:
+            observed_engine = (
+                payload.get("engine")
+                or payload.get("ocr", {}).get("engine")
+                or payload.get("htr", {}).get("engine")
+            )
+            if observed_engine != require_engine.lower():
+                raise click.ClickException(
+                    f"Expected runtime smoke engine {require_engine.lower()!r}, got {observed_engine!r}."
+                )
     except (RuntimeError, ValueError, FileNotFoundError) as exc:
         raise click.ClickException(str(exc)) from exc
     _print_json(payload)

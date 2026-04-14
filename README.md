@@ -14,6 +14,7 @@ Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract 
   - `runpod-submit` (manifest-aware RunPod pod submission, dry-run by default)
   - `har-publish` (Harness Artifact Registry model bundle publication, dry-run by default)
   - `pipeline-submit` (end-to-end manifest-aware submit, benchmark, and promotion workflow)
+  - `runtime-smoke-check` (printed or handwritten runtime validation for local resolution or live HTTP routes)
   - `api`
   - `demo`
 - Printed OCR routing:
@@ -26,13 +27,18 @@ Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract 
 - Handwritten defaults:
    - Latin: Kraken CATMuS Medieval (8-15th century manuscripts)
    - Greek: Kraken greek-german serifs model
-   - Syriac: Transkribus workflow bridge message path
+   - Syriac: HAR-backed Kraken runtime when a promoted handwritten `.mlmodel` is configured; otherwise fallback Transkribus bridge
 - Printed benchmark runner with CER/WER JSON reports
 - FastAPI backend (`msocr/service/api.py`)
 - Gradio browser demo (`msocr/service/gradio_demo.py`)
+- HAR-backed printed runtime model resolution for API and Gradio startup
+- HAR-backed handwritten runtime model resolution for API, CLI, and Gradio using `{lang}-{variant}-handwritten` package naming
+- Live runtime smoke helpers for `/ocr`, `/htr`, and Gradio root readiness
+- Delegate examples for printed runtime and Syriac handwritten runtime deployment under `pipeline/harness/`
 
 ### Planned
-- Production handwritten workflows for Syriac/Coptic/Armenian/Geez with local Kraken training from PAGE/ALTO exports.
+- Handwritten benchmark/evaluation parity inside `pipeline-submit` so HTR artifacts can be gated and promoted end-to-end without dropping to a dedicated Harness YAML.
+- Production handwritten workflows for Coptic/Armenian/Geez with local Kraken training from PAGE/ALTO exports.
 - Expanded language-aware classifier/router and post-correction modules.
 
 ## Installation
@@ -57,7 +63,7 @@ uv run msocr ocr --lang latin /path/to/file.pdf
 
 ### 3. Handwritten route
 ```bash
-uv run msocr htr --lang latin /path/to/line_or_page.png
+uv run msocr htr --lang syriac --provider auto --variant default /path/to/manuscript_line.png
 ```
 
 ### 4. Benchmark (printed)
@@ -73,7 +79,19 @@ uv run msocr benchmark \
 uv run msocr api --host 127.0.0.1 --port 8000
 ```
 
-### 6. Plan a RunPod training job
+### 6. Start API backend with a HAR-backed handwritten model
+```bash
+export MSOCR_HTR_RUNTIME_HAR_REGISTRY=msocr-models
+export MSOCR_HTR_RUNTIME_HAR_VERSION=v42
+export MSOCR_HTR_RUNTIME_HAR_FILENAME=model.mlmodel
+export MSOCR_HTR_RUNTIME_LANG=syriac
+export MSOCR_HTR_RUNTIME_VARIANT=default
+export MSOCR_HTR_RUNTIME_HAR_CACHE_DIR=models/runtime/htr
+
+uv run msocr api --host 127.0.0.1 --port 8000
+```
+
+### 7. Plan a RunPod training job
 ```bash
 uv run msocr runpod-submit \
   --manifest-id syriac-printed-v1 \
@@ -81,7 +99,7 @@ uv run msocr runpod-submit \
   --script-variant estrangela
 ```
 
-### 7. Plan a HAR model publication
+### 8. Plan a HAR model publication
 ```bash
 uv run msocr har-publish \
   --registry msocr-models \
@@ -91,7 +109,19 @@ uv run msocr har-publish \
   --model-file models/finetune/paynesmith_serto_v1.mlmodel
 ```
 
-### 8. Plan the full promotion workflow
+For handwritten runtime artifacts, use `--writing-mode handwritten` and a `.mlmodel`:
+
+```bash
+uv run msocr har-publish \
+  --registry msocr-models \
+  --lang syriac \
+  --script-variant default \
+  --writing-mode handwritten \
+  --version v42 \
+  --model-file /path/to/model.mlmodel
+```
+
+### 9. Plan the full promotion workflow
 ```bash
 uv run msocr pipeline-submit \
   --manifest-id syriac-train-v1 \
@@ -102,10 +132,33 @@ uv run msocr pipeline-submit \
   --registry msocr-models
 ```
 
-### 9. Start Gradio demo
+`pipeline-submit` is currently complete for printed benchmark/gate/promotion flows. Handwritten runtime deployment is supported, but handwritten benchmark/promotion parity still uses dedicated Harness YAML examples.
+
+### 10. Validate a live runtime with smoke checks
+```bash
+uv run msocr runtime-smoke-check \
+  --mode handwritten \
+  --lang syriac \
+  --variant default \
+  --provider auto \
+  --base-url http://127.0.0.1:8000 \
+  --image /path/to/manuscript_line.png \
+  --require-engine kraken
+```
+
+### 11. Start Gradio demo
 ```bash
 uv run msocr demo --host 127.0.0.1 --port 7860
 ```
+
+With handwritten HAR runtime enabled, Gradio uses the same `MSOCR_HTR_RUNTIME_*` env vars as the API.
+
+### 12. Use the Harness delegate examples
+
+- Printed runtime delegate pipeline:
+  - `pipeline/harness/syriac_printed_train_delegate.yaml`
+- Syriac handwritten runtime + Gradio delegate pipeline:
+  - `pipeline/harness/syriac_handwritten_runtime_delegate.yaml`
 
 ## CLI Reference
 
@@ -129,7 +182,12 @@ uv run msocr htr [OPTIONS] INPUT_PATH
 - Key options:
   - `--lang` (required)
   - `--provider auto|kraken|transkribus`
+  - `--variant <script_variant>`
   - `--model` (optional override)
+
+For Syriac handwritten requests, `--provider auto` now means:
+- use local Kraken inference when a HAR-backed handwritten runtime model is configured
+- otherwise fall back to the existing Transkribus bridge response
 
 ### `train`
 ```bash
@@ -157,12 +215,28 @@ uv run msocr pipeline-submit --manifest-id <train_manifest_id> --benchmark-manif
 - Builds a single manifest-aware workflow covering RunPod submission, benchmark evaluation, policy gating, and HAR promotion.
 - Defaults to dry-run JSON output; add `--execute` to submit the pod, run the benchmark, and publish only if the CER gate passes.
 
+### `runtime-smoke-check`
+```bash
+uv run msocr runtime-smoke-check --mode printed|handwritten --lang <lang> [OPTIONS]
+```
+- Supports local resolution-only validation or live HTTP probing with `--base-url`.
+- Printed mode can probe `/ocr` and uses the canonical sample in `assets/runtime/` when `--base-url` is set and `--image` is omitted.
+- Handwritten mode probes `/htr` and requires a caller-supplied manuscript image via `--image`.
+- Use `--require-engine` when you need to assert that the runtime is serving the promoted engine you expect.
+
 ## API Endpoints
 
 When running `api`:
 - `GET /health`
 - `POST /ocr`
 - `POST /htr`
+
+`POST /htr` accepts either JSON or multipart form uploads and supports:
+- `lang`
+- `variant`
+- `provider`
+- `model` (optional explicit override)
+- `device`
 
 OpenAPI docs:
 - `http://127.0.0.1:8000/docs`
@@ -182,6 +256,36 @@ Policy:
 - Printed acceptance gate: `CER <= 0.05`
 - `WER` tracked as secondary diagnostic metric
 - Failed cases should be marked for manual review
+
+Handwritten runtime deployment is implemented, but handwritten benchmark/promotion parity is still tracked separately from the printed benchmark workflow.
+
+## HAR Runtime Conventions
+
+Package naming follows:
+
+```text
+{lang}-{script_variant}-{writing_mode}
+```
+
+Examples:
+- `syr-estrangela-printed`
+- `syr-default-handwritten`
+
+Printed runtime env vars:
+- `MSOCR_PRINTED_RUNTIME_HAR_REGISTRY`
+- `MSOCR_PRINTED_RUNTIME_HAR_VERSION`
+- `MSOCR_PRINTED_RUNTIME_HAR_FILENAME`
+- `MSOCR_PRINTED_RUNTIME_HAR_PACKAGE` (optional explicit package override)
+- `MSOCR_PRINTED_RUNTIME_HAR_CACHE_DIR` (optional)
+
+Handwritten runtime env vars:
+- `MSOCR_HTR_RUNTIME_HAR_REGISTRY`
+- `MSOCR_HTR_RUNTIME_HAR_VERSION`
+- `MSOCR_HTR_RUNTIME_HAR_FILENAME`
+- `MSOCR_HTR_RUNTIME_LANG`
+- `MSOCR_HTR_RUNTIME_VARIANT`
+- `MSOCR_HTR_RUNTIME_HAR_PACKAGE` (optional explicit package override)
+- `MSOCR_HTR_RUNTIME_HAR_CACHE_DIR` (optional)
 
 ## Model Paths (Current Conventions)
 
