@@ -1,0 +1,42 @@
+[project]
+name = "msocr"
+version = "0.20.0"
+description = "Manuscript OCR for Sogdian and Old Turkish using Kraken"
+authors = [{name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com"}]
+requires-python = ">=3.9"
+dependencies = [
+    "kraken>=5.0.0",
+    "ocrmypdf>=14.0.0",
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "scikit-image>=0.21.0",
+    "click>=8.0.0",
+    "tqdm>=4.65.0",
+    "pyyaml>=6.0",
+    "jsonlines>=3.1.0",
+    "marimo>=0.1.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "gradio>=4.44.0",
+    "pypdfium2>=4.30.0",
+    "pypdf>=4.0.0",
+    "reportlab>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+msocr = "msocr.cli:main"

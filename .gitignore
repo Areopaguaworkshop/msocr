@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Project runtime artifacts
+output/
+
+# Large model files
+models/*.mlmodel
+models/kraken/
+models/pretrain/
+models/SyriacLexiconheader/
+models/tesseract/
+
+# Large dataset files
+dataset/
+dataset/synthetic_lines/
+dataset/raw_pages/
+dataset/processed_pages/
+
+# Test folder
+test/

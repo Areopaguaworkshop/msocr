@@ -1,0 +1,196 @@
+plan_id: harness_os_upgrade
+updated_at: 2026-04-14
+current_phase: step_11_handwritten_benchmark_and_pipeline_submit_parity
+status: in_progress
+
+completed:
+  - created a canonical shared language registry in msocr/language_registry.py
+  - standardized font metadata on web_font while keeping a compatibility mirror as font inside the shared registry
+  - normalized the legacy language alias armenia to the canonical code armenian across CLI, runtime, annotation API, output handling, and printed OCR routing
+  - removed the duplicated annotation-only language registry from msocr/data/session_manager.py
+  - aligned pipeline/printed_ocr_training.yaml with the canonical armenian language code
+  - fixed the annotation API contract so session creation and /api/languages return web_font consistently
+  - implemented session hydration from local files, browser uploads, and IIIF manifests in msocr/data/session_manager.py
+  - added automatic annotation-session page materialization, segmentation fallback, and crop generation
+  - expanded annotation API responses with segmentation_engine, page_count, line_count, needs_manual_review, and lines
+  - added a dedicated annotation-api CLI command instead of mounting the annotation app under the main OCR API
+  - introduced a frozen manifest manager in msocr/data/manifest.py for manifest_id-based resolution of training and benchmark inputs
+  - created a canonical data/manifests/ registry with a documented manifest schema aligned to the Harness upgrade docs
+  - upgraded msocr benchmark to accept manifest_id, resolve frozen manifests, prefer holdout partitions, and emit metrics.json-compatible provenance fields
+  - extended msocr train with split_manifest_id support so manifest-driven runs can resolve XML inputs from train/validation/holdout partitions
+  - replaced the generic dataset splitter's file-level random split with manuscript_id-isolated partitions and richer split manifest output
+  - added regression tests for manifest loading, manuscript overlap protection, and printed benchmark provenance reporting
+  - added a manifest-aware RunPod orchestration client in msocr/pipeline/runpod_client.py that builds official REST pod payloads and supports submit/poll/stop flows
+  - added a Harness Artifact Registry adapter in msocr/pipeline/har_client.py that wraps the documented hc generic-package and metadata workflow for model bundles
+  - extended the CLI with dry-run-first runpod-submit and har-publish commands so Harness/RunPod integration can be rehearsed locally before live submission
+  - added focused orchestration tests covering GPU-tier selection, manifest-derived RunPod payloads, and HAR bundle publication planning
+  - added a higher-level pipeline-submit workflow that chains manifest-aware RunPod submission, benchmark evaluation, policy gating, and HAR publication from one entrypoint
+  - taught the printed benchmark path to accept default model and engine overrides so the promotion workflow can evaluate the same artifact it plans to publish
+  - added explicit Tesseract traineddata override support for printed Syriac, Coptic, Armenian, and Geez routes to benchmark newly trained local artifacts
+  - automated Dockerfile.sha sidecar generation from the real Dockerfile input during promotion rather than relying on manual sidecar assembly
+  - added workflow regression tests covering gate behavior, successful promotion, and printed OCR traineddata override routing
+  - added RunPod rsync-over-SSH model retrieval so pipeline-submit can fetch a declared remote artifact into the pipeline output tree before benchmark and promotion
+  - enabled SSH-capable RunPod pod planning with optional SSH_PUBLIC_KEY injection for non-interactive delegate-driven retrieval
+  - persisted pipeline state.json snapshots and notification.json payloads under output/pipelines/<run>/<artifact>/ for structured step-level status reporting
+  - added optional webhook notification delivery for policy-gate failures, workflow blocks, retrieval failures, and successful artifact promotions
+  - taught the HAR adapter to perform non-interactive hc auth login from Harness delegate environment variables before publication
+  - tightened pipeline-submit so benchmark and promotion are blocked unless a concrete model artifact is available locally or via RunPod retrieval
+  - added regression tests covering SSH-enabled RunPod payloads, HAR delegate login planning, retrieval-backed promotion, and missing-artifact benchmark blocking
+  - added HAR generic-artifact pull support so runtime and delegate workflows can download published model files by package/version/filename
+  - added printed-runtime HAR model resolution with startup prefetch hooks for FastAPI and Gradio when deploy env vars point at a promoted artifact
+  - authored a concrete delegate-oriented Harness pipeline example at pipeline/harness/syriac_printed_train_delegate.yaml that wires RunPod, HAR auth, runtime smoke testing, and notification envs together
+  - added regression tests covering HAR pull command construction and printed runtime model resolution from HAR-backed deploy configuration
+  - added deploy-oriented startup helpers so msocr api and msocr demo perform the same runtime preflight before launching the service process
+  - added a runtime-smoke-check CLI command that validates deploy-time model resolution and can optionally run an end-to-end printed OCR smoke invocation
+  - extended the delegate pipeline example with a deploy/runtime smoke stage that launches the real `uv run msocr api` runtime path with HAR envs and verifies both /health and /ocr
+  - added deploy-helper regression tests covering HAR-backed smoke summaries and image-backed runtime smoke execution
+  - added canonical Syriac runtime smoke assets under assets/runtime/ so deploy validation can use a repo-owned sample image instead of an ad hoc host file
+  - extended runtime-smoke-check with live HTTP probing that waits for /health and posts a multipart OCR request against /ocr using the canonical sample image by default
+  - replaced the delegate's Docker-only health probe with a process-based `uv run msocr api` runtime launch that exercises the same startup path as the deployed FastAPI service and verifies OCR end to end
+  - added route-scoped handwritten runtime model resolution so API, CLI, and Gradio can pull promoted `.mlmodel` artifacts from HAR using the same `{lang}-{variant}-handwritten` naming contract as printed artifacts
+  - taught Syriac handwritten runtime to switch `provider=auto` from the Transkribus bridge to local Kraken inference whenever a promoted handwritten runtime model is configured
+  - extended `/htr`, `msocr htr`, and the runtime smoke CLI with handwritten `variant` support so runtime artifact names and deploy validation can target the correct script variant
+  - added handwritten runtime smoke helpers for local and live HTTP `/htr` validation, plus a Gradio root probe for web deployment readiness checks
+  - authored a concrete delegate-oriented handwritten runtime example at pipeline/harness/syriac_handwritten_runtime_delegate.yaml that prefetches a HAR-backed `.mlmodel`, validates API `/htr`, and launches Gradio as a separate web surface
+  - aligned the generic HTR Harness blueprint so promoted handwritten artifacts use `{lang}-{script_variant}-handwritten-v{sequenceId}` naming and both API and Gradio consume the same runtime model contract
+
+decisions:
+  - annotation_api remains a dedicated FastAPI app module served by the new msocr annotation-api command; merging into msocr/service/api.py is deferred
+  - the legacy alias armenia remains accepted for compatibility, but all stored and returned language values are canonicalized to armenian
+  - direct --gt-dir/--gt-file training remains available for ad hoc local runs, but reproducible training and benchmark paths now flow through manifest_id resolution
+  - the HAR adapter uses the documented Harness CLI workflow rather than a guessed private API so artifact publication stays aligned with the current public product surface
+  - the pipeline-level workflow blocks HAR promotion unless a benchmark manifest is supplied and the CER policy gate passes
+  - RunPod artifact retrieval is implemented as declared remote-path rsync over exposed SSH rather than a guessed private artifact API, using the pod's public IP and mapped TCP port 22
+  - delegate-friendly HAR authentication uses documented hc auth login --non-interactive with HARNESS_API_TOKEN/HARNESS_ACCOUNT_ID/HARNESS_ORG_ID/HARNESS_PROJECT_ID rather than assuming a pre-populated auth file
+  - pipeline state updates are always written locally, while webhook notification delivery is best-effort and must not block a successful promotion
+  - printed runtime deploys resolve promoted models either from an explicit local path or from HAR coordinates supplied as environment variables, with startup prefetch only when a package is fully specified
+  - API and demo startup now fail fast by running the same runtime preflight that deployment smoke checks use, so bad HAR runtime configuration is detected before the service begins serving
+  - deploy/runtime smoke alignment now uses the real `uv run msocr api` startup path plus a live /ocr request instead of a Docker-only /health probe, because the production contract is HAR-backed FastAPI startup rather than delegate-local container port publishing
+  - handwritten runtime artifacts use the same HAR package naming convention as printed artifacts (`{lang}-{variant}-{writing_mode}`), with `handwritten` as the writing mode token
+  - Syriac handwritten `provider=auto` now means "prefer promoted local Kraken model when configured, otherwise fall back to the existing Transkribus bridge"
+  - Gradio is now treated as a separate web-deploy surface with its own delegate smoke path, while still sharing the same runtime preflight and HAR-backed model contract as the API
+
+verification:
+  - command: uv run pytest tests/data/test_session_manager.py tests/service/test_annotation_api.py -q
+    result: pass
+    notes: rerun after Step 3 changes
+  - command: uv run pytest tests/data/test_manifest.py tests/evaluation/test_printed_benchmark.py tests/data/test_session_manager.py tests/service/test_annotation_api.py -q
+    result: pass
+    notes: manifest manager and benchmark contract regression coverage
+  - command: uv run pytest -q
+    result: pass
+    notes: 42 passed after Step 5 pipeline workflow changes
+  - command: uv run python -m compileall msocr
+    result: pass
+    notes: rerun after Step 5 pipeline workflow changes
+  - command: uv run pytest tests/pipeline/test_runpod_client.py tests/pipeline/test_har_client.py -q
+    result: pass
+    notes: orchestration adapter regression coverage
+  - command: uv run pytest tests/pipeline/test_workflow.py tests/pipelines/test_printed_ocr.py -q
+    result: pass
+    notes: pipeline-level workflow and printed OCR override regression coverage
+  - command: uv run pytest tests/pipeline/test_runpod_client.py tests/pipeline/test_har_client.py tests/pipeline/test_workflow.py -q
+    result: pass
+    notes: step 6 retrieval, delegate auth, and notification/state regression coverage
+  - command: uv run pytest -q
+    result: pass
+    notes: 46 passed after Step 6 retrieval/notification wiring
+  - command: uv run python -m compileall msocr
+    result: pass
+    notes: rerun after Step 6 retrieval/notification wiring
+  - command: uv run pytest tests/pipeline/test_har_client.py tests/service/test_runtime.py -q
+    result: pass
+    notes: step 7 HAR pull and runtime artifact resolution coverage
+  - command: uv run pytest tests/service/test_deploy.py tests/service/test_runtime.py tests/pipeline/test_har_client.py -q
+    result: pass
+    notes: step 8 deploy preflight and runtime smoke coverage
+  - command: uv run pytest -q
+    result: pass
+    notes: 51 passed after Step 8 deploy/runtime smoke integration
+  - command: uv run python -m compileall msocr
+    result: pass
+    notes: rerun after Step 8 deploy/runtime smoke integration
+  - command: uv run pytest tests/service/test_deploy.py tests/service/test_runtime.py tests/pipeline/test_har_client.py -q
+    result: pass
+    notes: step 9 live runtime OCR probe coverage
+  - command: uv run pytest -q
+    result: pass
+    notes: 53 passed after Step 9 runtime probe and process-based deploy smoke alignment
+  - command: uv run python -m compileall msocr
+    result: pass
+    notes: rerun after Step 9 runtime probe and process-based deploy smoke alignment
+  - command: uv run msocr runtime-smoke-check --lang syriac --variant estrangela --base-url http://127.0.0.1:18081 --image assets/runtime/syriac_estrangela_smoke.png --engine tesseract --timeout 60 --poll-interval 2
+    result: pass
+    notes: verified live local FastAPI startup plus /health and /ocr runtime smoke flow against the canonical Syriac sample image
+  - command: uv run pytest tests/service/test_runtime.py tests/service/test_deploy.py tests/pipeline/test_har_client.py -q
+    result: pass
+    notes: step 10 handwritten runtime resolution, HTR smoke helpers, and Gradio web smoke coverage
+  - command: uv run pytest -q
+    result: pass
+    notes: 58 passed after Step 10 handwritten runtime and Gradio web deployment changes
+  - command: uv run python -m compileall msocr
+    result: pass
+    notes: rerun after Step 10 handwritten runtime and Gradio web deployment changes
+  - command: uv run msocr runtime-smoke-check --mode handwritten --lang syriac --variant default --provider auto --require-engine transkribus --base-url http://127.0.0.1:18082 --image assets/runtime/syriac_estrangela_smoke.png --timeout 60 --poll-interval 2
+    result: pass
+    notes: verified live local FastAPI `/htr` multipart transport and handwritten smoke routing without assuming a promoted manuscript model in the workspace
+  - command: uv run msocr demo --host 127.0.0.1 --port 17861 and gradio_http_smoke_check(base_url=http://127.0.0.1:17861)
+    result: pass
+    notes: verified live Gradio startup and separate web-surface readiness probe
+
+changed_files:
+  - assets/runtime/README.md
+  - assets/runtime/syriac_estrangela_smoke.png
+  - assets/runtime/syriac_estrangela_smoke.txt
+  - data/manifests/README.md
+  - msocr/language_registry.py
+  - msocr/cli.py
+  - msocr/pipelines/printed_ocr.py
+  - msocr/service/runtime.py
+  - msocr/service/gradio_demo.py
+  - msocr/output/formats.py
+  - msocr/pipeline/__init__.py
+  - msocr/pipeline/runpod_client.py
+  - msocr/pipeline/har_client.py
+  - msocr/pipeline/workflow.py
+  - docs/plans/2026-04-07-harness-os-progress.yaml
+  - pipeline/harness/htr_generic_train.yaml
+  - pipeline/harness/syriac_handwritten_runtime_delegate.yaml
+  - pipeline/harness/syriac_printed_train_delegate.yaml
+  - msocr/service/annotation_api.py
+  - msocr/service/deploy.py
+  - msocr/data/__init__.py
+  - msocr/data/manifest.py
+  - msocr/data/session_manager.py
+  - msocr/datasets/splitter.py
+  - msocr/evaluation/printed_benchmark.py
+  - msocr/pipelines/printed_ocr.py
+  - pipeline/printed_ocr_training.yaml
+  - tests/service/test_annotation_api.py
+  - tests/data/test_manifest.py
+  - tests/evaluation/test_printed_benchmark.py
+  - tests/pipeline/test_runpod_client.py
+  - tests/pipeline/test_har_client.py
+  - tests/pipeline/test_workflow.py
+  - tests/service/test_runtime.py
+  - tests/service/test_deploy.py
+  - tests/pipelines/test_printed_ocr.py
+
+remaining_for_step_11:
+  - add handwritten benchmark/evaluation support to the higher-level pipeline-submit workflow so HTR artifacts can be gated and promoted end-to-end without dropping to a manual Harness YAML-only path
+  - decide whether the repo should ship a canonical manuscript HTR smoke fixture, or whether delegate/runtime validation should continue to require a caller-supplied handwritten sample image
+
+known_risks:
+  - the shared registry now unifies language metadata, but route selection is still hardcoded in msocr/pipelines/printed_ocr.py and msocr/service/runtime.py
+  - Harness/RunPod orchestration modules described in docs do not exist yet; this step established the local manifest and benchmark contract layer only
+  - annotation API now hydrates sessions, but segmentation quality still depends entirely on Kraken fallback behavior and lacks manual redraw/edit endpoints
+  - IIIF support currently resolves the first canvas image only
+  - DVC tracking is documented and surfaced on manifest metadata, but the repo does not yet enforce DVC sidecars or automate data publication
+  - live Harness publication now authenticates non-interactively, but still depends on the external hc CLI binary being installed on the delegate or developer machine
+  - RunPod retrieval currently requires an explicit remote file path plus SSH-capable pod access with rsync available on the caller machine
+  - webhook notifications are best-effort and currently record delivery failures in state rather than retrying automatically
+  - live runtime OCR smoke now depends on native OCR tooling being present on the selected delegate or target host; for the current Syriac printed path that means Tesseract must be installed where `msocr api` is launched
+  - handwritten runtime validation currently requires a caller-supplied manuscript image path; the repo does not yet ship a canonical HTR smoke fixture that can prove real manuscript quality end to end
+  - the live `/htr` smoke path can still exercise the legacy Transkribus bridge when no handwritten runtime model is configured; the delegate example guards against this by requiring `engine=kraken` for promoted-artifact validation
+
+next_recommended_action: step_11_handwritten_benchmark_and_pipeline_submit_parity

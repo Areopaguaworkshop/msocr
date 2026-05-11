@@ -1,0 +1,265 @@
+{
+  "schema_version": 1,
+  "scanned_at": "2026-04-04T16:59:21.426Z",
+  "files": [
+    {
+      "path": ".venv/lib/python3.12/site-packages/gradio_client/CHANGELOG.md",
+      "title": "gradio_client",
+      "summary": "- [#12614](https://github.com/gradio-app/gradio/pull/12614) [`6222192`](https://github.com/gradio-app/gradio/commit/622219242412400df57a73aebfd3de96bb8499de) - fix(client): make WebP and VTT MIME t...",
+      "lines": 1199,
+      "mtime": 1770912971319.6897
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/gradio/CHANGELOG.md",
+      "title": "gradio",
+      "summary": "- [#12840](https://github.com/gradio-app/gradio/pull/12840) [`26cea7a`](https://github.com/gradio-app/gradio/commit/26cea7ad6fbaf0352f0dc0d44e37c24c8f1797f8) - Ensure change event fires when slider...",
+      "lines": 7742,
+      "mtime": 1770912971863.7285
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/gradio/cli/commands/components/files/README.md",
+      "title": "<<title>>",
+      "summary": "--- tags: [gradio-custom-component<<template>><<tags>>] title: <<title>> short_description: <<short-description>> colorFrom: blue colorTo: yellow sdk: gradio pinned: false app_file: space.py --- Yo...",
+      "lines": 16,
+      "mtime": 1770912972264.757
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/gradio/icons/README.md",
+      "title": "README.md",
+      "summary": "The icons in this directory are loaded via `gradio.utils.get_icon_path` and can be used directly in backend code (e.g. to populate icons in components).",
+      "lines": 2,
+      "mtime": 1770912972558.778
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/lightning_fabric/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). - - - - ---",
+      "lines": 646,
+      "mtime": 1770065533740.056
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/lightning/fabric/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). - Made saving non-distributed checkpoints fully ...",
+      "lines": 497,
+      "mtime": 1769259886880.4805
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/lightning/pytorch/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). - Made saving non-distributed checkpoints fully ...",
+      "lines": 4722,
+      "mtime": 1769259893979.8838
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/marimo/_lsp/copilot/policy-templates/darwin/README.md",
+      "title": "GitHub Copilot macOS Policy Configuration",
+      "summary": "This directory contains policy templates for configuring GitHub Copilot behavior on macOS systems using Apple Configuration Profiles. The `IDEGitHubCopilot.mobileconfig` file is a macOS Configurati...",
+      "lines": 117,
+      "mtime": 1770913494850.9329
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/marimo/_lsp/copilot/policy-templates/win32/README.md",
+      "title": "GitHub Copilot Group Policy Templates for Windows",
+      "summary": "This directory contains Administrative Template (ADMX/ADML) files for managing GitHub Copilot settings through Windows Group Policy. These templates are bundled with the GitHub Copilot Language Ser...",
+      "lines": 140,
+      "mtime": 1770913494851.9329
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/marimo/_schemas/README.md",
+      "title": "Schemas",
+      "summary": "This directory contains the schemas for the notebook, session, and kernel messages. - **notebook.py**: Schema for the notebook file format - **session.py**: Schema for the notebook session (outputs...",
+      "lines": 28,
+      "mtime": 1770913496046.0176
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/marimo/_static/CLAUDE.md",
+      "title": "Marimo notebook assistant",
+      "summary": "I am a specialized AI assistant designed to help create data science notebooks using marimo. I focus on creating clear, efficient, and reproducible data analysis workflows with marimo's reactive pr...",
+      "lines": 368,
+      "mtime": 1770913496123.023
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/marimo/_tutorials/README.md",
+      "title": "Tutorial",
+      "summary": "This folder contains tutorials to help you get started with marimo. Open them with `marimo tutorial` at the command line.",
+      "lines": 6,
+      "mtime": 1770913498987.2263
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/marimo/AGENTS.md",
+      "title": "Python Backend Guidelines",
+      "summary": "You are an expert in Python, websockets protocol, and Starlette/ASGI web frameworks. - Prioritize readability and maintainability; follow PEP 8 (79 char line limit) - Use type hints consistently th...",
+      "lines": 136,
+      "mtime": 1770913485976.3032
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/pyarrow/tests/data/orc/README.md",
+      "title": "README.md",
+      "summary": "<!--- Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements.  See the NOTICE file distributed with this work for additional information regarding copyrig...",
+      "lines": 23,
+      "mtime": 1769263223710.9978
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/pytorch_lightning/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). --- - - - -",
+      "lines": 5016,
+      "mtime": 1770065534083.0747
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/pytorch_lightning/README.md",
+      "title": "README.md",
+      "summary": "<div align=\"center\"> <img src=\"https://pl-public-data.s3.amazonaws.com/assets_lightning/pytorch-lightning.png\" width=\"400px\"> **The lightweight PyTorch wrapper for high-performance AI research. Sca...",
+      "lines": 383,
+      "mtime": 1770065534090.075
+    },
+    {
+      "path": ".venv/lib/python3.12/site-packages/torchgen/packaged/autograd/README.md",
+      "title": "README.md",
+      "summary": "If you add a file to this directory, you **MUST** update `torch/CMakeLists.txt` and add the file as a dependency to the `add_custom_command` call.",
+      "lines": 4,
+      "mtime": 1769268375304.2664
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/gradio_client/CHANGELOG.md",
+      "title": "gradio_client",
+      "summary": "- [#12614](https://github.com/gradio-app/gradio/pull/12614) [`6222192`](https://github.com/gradio-app/gradio/commit/622219242412400df57a73aebfd3de96bb8499de) - fix(client): make WebP and VTT MIME t...",
+      "lines": 1199,
+      "mtime": 1770912971319.6897
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/gradio/CHANGELOG.md",
+      "title": "gradio",
+      "summary": "- [#12840](https://github.com/gradio-app/gradio/pull/12840) [`26cea7a`](https://github.com/gradio-app/gradio/commit/26cea7ad6fbaf0352f0dc0d44e37c24c8f1797f8) - Ensure change event fires when slider...",
+      "lines": 7742,
+      "mtime": 1770912971863.7285
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/gradio/cli/commands/components/files/README.md",
+      "title": "<<title>>",
+      "summary": "--- tags: [gradio-custom-component<<template>><<tags>>] title: <<title>> short_description: <<short-description>> colorFrom: blue colorTo: yellow sdk: gradio pinned: false app_file: space.py --- Yo...",
+      "lines": 16,
+      "mtime": 1770912972264.757
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/gradio/icons/README.md",
+      "title": "README.md",
+      "summary": "The icons in this directory are loaded via `gradio.utils.get_icon_path` and can be used directly in backend code (e.g. to populate icons in components).",
+      "lines": 2,
+      "mtime": 1770912972558.778
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/lightning_fabric/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). - - - - ---",
+      "lines": 646,
+      "mtime": 1770065533740.056
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/lightning/fabric/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). - Made saving non-distributed checkpoints fully ...",
+      "lines": 497,
+      "mtime": 1769259886880.4805
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/lightning/pytorch/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). - Made saving non-distributed checkpoints fully ...",
+      "lines": 4722,
+      "mtime": 1769259893979.8838
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/marimo/_lsp/copilot/policy-templates/darwin/README.md",
+      "title": "GitHub Copilot macOS Policy Configuration",
+      "summary": "This directory contains policy templates for configuring GitHub Copilot behavior on macOS systems using Apple Configuration Profiles. The `IDEGitHubCopilot.mobileconfig` file is a macOS Configurati...",
+      "lines": 117,
+      "mtime": 1770913494850.9329
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/marimo/_lsp/copilot/policy-templates/win32/README.md",
+      "title": "GitHub Copilot Group Policy Templates for Windows",
+      "summary": "This directory contains Administrative Template (ADMX/ADML) files for managing GitHub Copilot settings through Windows Group Policy. These templates are bundled with the GitHub Copilot Language Ser...",
+      "lines": 140,
+      "mtime": 1770913494851.9329
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/marimo/_schemas/README.md",
+      "title": "Schemas",
+      "summary": "This directory contains the schemas for the notebook, session, and kernel messages. - **notebook.py**: Schema for the notebook file format - **session.py**: Schema for the notebook session (outputs...",
+      "lines": 28,
+      "mtime": 1770913496046.0176
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/marimo/_static/CLAUDE.md",
+      "title": "Marimo notebook assistant",
+      "summary": "I am a specialized AI assistant designed to help create data science notebooks using marimo. I focus on creating clear, efficient, and reproducible data analysis workflows with marimo's reactive pr...",
+      "lines": 368,
+      "mtime": 1770913496123.023
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/marimo/_tutorials/README.md",
+      "title": "Tutorial",
+      "summary": "This folder contains tutorials to help you get started with marimo. Open them with `marimo tutorial` at the command line.",
+      "lines": 6,
+      "mtime": 1770913498987.2263
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/marimo/AGENTS.md",
+      "title": "Python Backend Guidelines",
+      "summary": "You are an expert in Python, websockets protocol, and Starlette/ASGI web frameworks. - Prioritize readability and maintainability; follow PEP 8 (79 char line limit) - Use type hints consistently th...",
+      "lines": 136,
+      "mtime": 1770913485976.3032
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/pyarrow/tests/data/orc/README.md",
+      "title": "README.md",
+      "summary": "<!--- Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements.  See the NOTICE file distributed with this work for additional information regarding copyrig...",
+      "lines": 23,
+      "mtime": 1769263223710.9978
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/pytorch_lightning/CHANGELOG.md",
+      "title": "Changelog",
+      "summary": "All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/). --- - - - -",
+      "lines": 5016,
+      "mtime": 1770065534083.0747
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/pytorch_lightning/README.md",
+      "title": "README.md",
+      "summary": "<div align=\"center\"> <img src=\"https://pl-public-data.s3.amazonaws.com/assets_lightning/pytorch-lightning.png\" width=\"400px\"> **The lightweight PyTorch wrapper for high-performance AI research. Sca...",
+      "lines": 383,
+      "mtime": 1770065534090.075
+    },
+    {
+      "path": ".venv/lib64/python3.12/site-packages/torchgen/packaged/autograd/README.md",
+      "title": "README.md",
+      "summary": "If you add a file to this directory, you **MUST** update `torch/CMakeLists.txt` and add the file as a dependency to the `add_custom_command` call.",
+      "lines": 4,
+      "mtime": 1769268375304.2664
+    },
+    {
+      "path": "models/README.md",
+      "title": "Model Storage",
+      "summary": "Place OCR/HTR model files in this folder. Current convention: - Greek printed Kraken primary model: `models/kraken/greek-english_porson_sophoclesplaysa05campgoog/greek-english_porson_sophoclesplays...",
+      "lines": 28,
+      "mtime": 1770906826201.5154
+    },
+    {
+      "path": "README.md",
+      "title": "msocr",
+      "summary": "Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract integration, benchmark reporting, FastAPI service APIs, and Gradio demo UI. - CLI with subcommands: - `ocr` (printed ...",
+      "lines": 190,
+      "mtime": 1773694535426.19
+    },
+    {
+      "path": "test/benchmarks/README.md",
+      "title": "Printed Benchmark Pack",
+      "summary": "This folder contains benchmark preparation artifacts for step-1 printed OCR validation. - `printed/<language>/...png`: downloaded online benchmark images - `references/<language>_sample_001.txt`: g...",
+      "lines": 24,
+      "mtime": 1770913611622.213
+    }
+  ]
+}
