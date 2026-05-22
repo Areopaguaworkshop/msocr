@@ -1,0 +1,92 @@
+schema_version: msocr.docspec.v1
+id: pipeline.printed_ocr_training
+title: Printed OCR Training Pipeline
+purpose: Define high-accuracy printed OCR training and evaluation flow with CATMuS-Print Large (2024-01-30) for Latin.
+notes: |
+  Updated to use CATMuS-Print Large (DOI: 10.5281/zenodo.10592716) for printed Latin OCR.
+  Accuracy: 98.56%, CER: 1.44%. Baseline segmentation now properly configured.
+scope:
+    project: msocr
+    languages:
+        - name: greek
+          status: implementation_priority_1
+        - name: latin
+          status: implementation_priority_1
+        - name: syriac
+          status: planned
+        - name: coptic
+          status: planned
+        - name: armenian
+          status: planned
+        - name: geez
+          status: planned
+        - name: sogdian
+          status: planned_later_phase
+        - name: old_turkish
+          status: planned_later_phase
+    writing_modes:
+        - printed
+inputs:
+    required:
+        - target_language
+        - writing_mode
+        - split_manifest_id
+        - model_config_id
+    optional:
+        - desired_accuracy
+workflow:
+    - step_id: PRT1
+      name: route_assertion
+      action: Enforce writing_mode equals printed.
+    - step_id: PRT2
+      name: preprocess_printed
+      action: Apply printed profile preprocessing.
+    - step_id: PRT3
+      name: train_printed_model
+      action: Train printed OCR profile with ketos wrapper.
+    - step_id: PRT4
+      name: benchmark
+      action: Evaluate CER and WER on frozen test set.
+    - step_id: PRT5
+      name: gate
+      action: Apply printed acceptance threshold and review policy.
+    - step_id: PRT6
+      name: implement_greek_latin_printed
+      action: Implement printed OCR pipeline logic for Greek and Latin under msocr package modules.
+metrics:
+    primary:
+        - CER
+    secondary:
+        - WER
+thresholds:
+    printed:
+        cer_max: 0.05
+    rule: Manual review if printed gate fails or confidence is unstable.
+fallback:
+    failed_or_unstable:
+        - stronger_preprocessing_profile
+        - secondary_model_profile
+        - set_needs_manual_review_true
+outputs:
+    artifacts:
+        - printed_model
+        - printed_benchmark_report
+        - review_flag
+integration:
+    implemented_modules:
+        - msocr/preprocessing/pipeline.py
+        - msocr/training/ketos_trainer.py
+        - msocr/models/inference.py
+    planned_modules:
+        - printed_profile_registry
+tooling:
+    package_manager: uv
+    runtime_execution: uv run
+    code_location_policy: all_new_code_under_msocr
+status:
+    maturity: active_blueprint
+    implementation_state: implementation_in_progress
+owners:
+    - role: printed_ocr
+      team: msocr
+last_updated: 2026-02-13

@@ -1,0 +1,583 @@
+project:
+  name: payne-smith-syriac-ocr
+  version: 2.1
+  description: >
+    Fully open-source OCR training pipeline for the Payne Smith Syriac dictionary.
+    Uses Kraken for segmentation, recognition, and model training.
+    Bootstraps from the Vienna 2024 Syriac Ground Truth dataset.
+    Designed for deterministic dataset generation and incremental training.
+    Handles dual-script pages (Serto body + Estrangelo headers) and
+    mixed Syriac/Latin lines. Includes synthetic data augmentation to
+    bridge the manuscript-to-print domain gap.
+
+license:
+  kraken: MIT
+  escriptorium: MIT
+  vienna_ground_truth: CC_BY_4.0
+  scikit_image: BSD
+  poppler_utils: GPL_2
+
+notes:
+  script_mismatch_warning: >
+    The Vienna 2024 GT is a 16th-century handwritten Serto manuscript.
+    The Payne Smith dictionary is a 1903 Oxford printed typeface.
+    These are different visual domains. Phase 0b generates synthetic
+    printed-Serto lines to bridge this gap before manual annotation begins.
+  dual_script_warning: >
+    Payne Smith body text uses Serto (Jacobite) script.
+    Section headers use Estrangelo script.
+    Both are handled via region classification after segmentation.
+  dukhrana_note: >
+    The Dukhrana online Payne Smith lexicon (dukhrana.com/lexicon/PayneSmith/)
+    provides a pre-existing structured word list that can supplement the
+    phase_10 lexicon correction without OCR. Check before building a
+    custom lexicon from scratch.
+  htr_united_note: >
+    Consider registering the final ground truth corpus with HTR-United
+    for citability and discoverability, consistent with the CC BY 4.0
+    spirit of the Vienna dataset.
+
+environment:
+  package_manager: uv
+  python_version: "3.11"
+
+  system_dependencies:
+    - poppler-utils
+    - imagemagick
+    - git-lfs
+    - docker
+    - docker-compose
+
+  python_packages:
+    core:
+      - kraken
+      - numpy
+      - opencv-python
+      - pillow
+      - tqdm
+      - pandas
+      - scikit-image
+      - scikit-learn
+      - editdistance
+      - symspellpy
+      - lxml
+      - trdg # TextRecognitionDataGenerator for synthetic lines
+
+    utilities:
+      - pyyaml
+      - orjson
+      - rich
+
+setup:
+  steps:
+    - name: create_environment
+      command: |
+        uv init payne-smith-ocr
+        cd payne-smith-ocr
+        uv python install 3.11
+        uv venv
+        uv add kraken numpy opencv-python pillow tqdm pandas \
+               scikit-image scikit-learn editdistance symspellpy \
+               lxml pyyaml orjson rich trdg
+        uv lock   # pin all dependency versions for reproducibility
+
+    - name: download_vienna_ground_truth
+      command: |
+        git lfs install
+        git clone https://github.com/HTR-School-Vienna/2024--Syriac.git \
+          dataset/pretrain/vienna
+
+    - name: install_escriptorium
+      # Pin to a specific release tag to avoid breaking changes
+      command: |
+        git clone --branch v0.13.3 \
+          https://gitlab.com/scripta/escriptorium.git
+        cd escriptorium
+        docker-compose up -d
+
+directories:
+  input_pages: ./input
+
+  dataset:
+    raw_pages: ./dataset/raw_pages
+    processed_pages: ./dataset/processed_pages
+
+    lines: ./dataset/lines
+
+    bootstrap: ./dataset/bootstrap_predictions
+    rejected: ./dataset/rejected_predictions
+    corrected: ./dataset/corrected_lines
+
+    synthetic: ./dataset/synthetic_lines # generated in phase_0b
+
+    train: ./dataset/train
+    validation: ./dataset/validation
+    holdout: ./dataset/holdout
+
+    manifest: ./dataset/manifest.json
+
+  models:
+    segmentation: ./models/segmentation
+    pretrain: ./models/pretrain
+    finetune: ./models/finetune
+
+  exports: ./exports
+  logs: ./logs
+
+configuration:
+  # Single canonical source for random seed — referenced by all phases
+  # that use randomness (augmentation, train/val split, uncertainty sampling).
+  random_seed: 42
+
+  dpi: 500
+  line_height: 48
+
+  preprocessing:
+    deskew: true
+    denoise: true
+
+    binarization: sauvola
+    sauvola_window: 31
+    sauvola_k: 0.15
+
+    background_normalization: true
+
+  segmentation:
+    model: blla
+    reading_order: rtl
+    min_confidence: 0.50
+
+    region_types:
+      - MainZone # Serto body text
+      - TitleZone # Estrangelo headers
+      - MarginZone # Optional — marginal glosses
+
+  dataset:
+    training_lines: 500
+    validation_ratio: 0.10
+    holdout_ratio: 0.05
+
+    incremental_training: true
+    active_learning_ratio: 0.40
+    # NOTE: Log bootstrap confidence distributions per training phase
+    # to tune active_learning_ratio empirically over iterations.
+
+  bootstrap:
+    engine: kraken
+    model: models/pretrain/vienna_serto.mlmodel
+
+    # Character-level confidences are aggregated per line before filtering.
+    # Options: mean | min | p10
+    confidence_aggregation: mean
+    confidence_threshold: 0.80
+
+  script_detection:
+    syriac_unicode_range:
+      start: 0700
+      end: 074F
+
+    latin_range:
+      start: 0041
+      end: 007A
+
+  language_correction:
+    # Edit distance 2 is aggressive for Syriac due to short consonantal roots.
+    # Start at 1 and measure false-correction rate before increasing.
+    symspell_max_edit_distance: 1
+
+pipeline:
+  phase_0_pretrain:
+    description: >
+      Train base Syriac OCR model using Vienna 2024 handwritten ground truth.
+      NOTE: This produces a manuscript-domain model. It will be further
+      adapted in phase_8 using synthetic printed lines (phase_0b) and
+      manually corrected Payne Smith lines.
+
+    command: |
+      kraken train \
+        --training-files dataset/pretrain/vienna/**/*.xml \
+        --output models/pretrain/vienna_serto.mlmodel \
+        --text-direction rtl \
+        --augment \
+        --lag 10 \
+        --min-epochs 30
+
+    logging:
+      save_config: true
+      save_training_metrics: true
+      save_model_hash: true
+      kraken_version: true # log exact Kraken version; breaking changes exist between minor versions
+
+    expected_cer: 10-15%
+
+  phase_0b_synthetic_augmentation:
+    description: >
+      Render synthetic printed Syriac lines using Unicode fonts to bridge
+      the manuscript-to-print domain gap before manual annotation begins.
+      Generates paired (image, text) training data directly in Kraken XML format.
+
+    fonts:
+      - Estrangelo Edessa
+      - Serto Jerusalem
+      - East Syriac Adiabene
+
+    tools:
+      - trdg # TextRecognitionDataGenerator
+      - Pillow text rendering (fallback)
+
+    lexicon_source:
+      - dataset/pretrain/vienna/wordlists/*.txt
+      - dukhrana_payne_smith_wordlist # if available; see notes.dukhrana_note
+
+    line_count: 2000
+    random_seed: ${configuration.random_seed}
+
+    augmentations:
+      gaussian_noise: true
+      slight_blur: true
+      random_rotation_deg: [-1, 1]
+      ink_bleed_simulation: true
+      random_dilation: true
+
+    output: dataset/synthetic_lines
+
+    command: |
+      trdg \
+        --language syr \
+        --fonts-dir ./fonts/syriac \
+        --count 2000 \
+        --output-dir dataset/synthetic_lines \
+        --margins 5,5,5,5 \
+        --blur 1 \
+        --distorsion 1 \
+        --random-blur \
+        --format 48
+
+  phase_1_ingest_pages:
+    steps:
+      - name: pdf_to_images
+        command: |
+          pdftoppm -tiff -r 500 input.pdf dataset/raw_pages/page
+
+      - name: convert_to_png
+        # Explicit -depth 8 prevents silent downconversion of 16-bit TIFFs
+        command: |
+          for f in dataset/raw_pages/*.tif; do
+            convert "$f" -depth 8 -compress none "${f%.tif}.png"
+          done
+
+  phase_2_preprocess:
+    pseudocode: |
+      for page in raw_pages:
+
+          img = load(page)
+
+          if deskew:
+              img = deskew(img)
+
+          if denoise:
+              img = nlm_denoise(img)
+
+          thresh = sauvola_threshold(img,
+                     window=configuration.preprocessing.sauvola_window,
+                     k=configuration.preprocessing.sauvola_k)
+          binary = img > thresh
+
+          save(binary)
+
+  phase_3_segmentation:
+    description: >
+      Perform line segmentation using Kraken BLLA model.
+      Classifies regions into MainZone (Serto body) and TitleZone
+      (Estrangelo headers) for downstream model routing.
+
+    command: |
+      kraken -i page.png lines.json segment \
+        --model blla \
+        --reading-order-model blla \
+        --text-direction rtl
+
+  phase_3b_region_classification:
+    description: >
+      Tag segmented zones by script type so downstream OCR can route
+      lines to the appropriate model. Serto body text and Estrangelo
+      headers require different recognition models.
+
+    method: zone_label_from_segmentation_metadata
+
+    region_types:
+      MainZone: Serto # body dictionary text
+      TitleZone: Estrangelo # section/letter headers
+      MarginZone: Serto # marginal glosses (treat as body)
+
+    model_routing:
+      Serto: models/finetune/paynesmith_serto.mlmodel
+      Estrangelo: models/finetune/paynesmith_estrangela.mlmodel
+
+    output: dataset/lines/region_labels.json
+
+  phase_4_line_extraction:
+    output: dataset/lines
+
+    naming: six_digit
+
+    save_baselines: true
+
+  phase_5_bootstrap_ocr:
+    description: >
+      Generate initial OCR using the pretrained Vienna Syriac model.
+      Confidence scores are character-level; aggregated to line-level
+      using the method defined in configuration.bootstrap.confidence_aggregation.
+
+    depends_on: phase_0_pretrain
+
+    model_check: |
+      [ -f models/pretrain/vienna_serto.mlmodel ] || \
+        { echo "ERROR: models/pretrain/vienna_serto.mlmodel not found. Run phase_0 first."; exit 1; }
+
+    command: |
+      kraken -i line.png line.json ocr \
+        -m models/pretrain/vienna_serto.mlmodel
+
+    confidence:
+      aggregation: ${configuration.bootstrap.confidence_aggregation}
+      threshold: ${configuration.bootstrap.confidence_threshold}
+
+    filtering:
+      if_aggregated_confidence_above: 0.80
+      accept: dataset/bootstrap
+      reject: dataset/rejected
+
+  phase_6_manual_correction:
+    tool: escriptorium
+
+    workflow:
+      - import lines and bootstrap text
+      - correct rejected predictions first
+      - correct low-confidence predictions
+      - export corrected PAGE XML
+
+  phase_7_dataset_split:
+    random_seed: ${configuration.random_seed}
+
+    algorithm:
+      random_sample:
+        ratio: 0.60
+
+      uncertainty_sample:
+        ratio: 0.40
+        metric: lowest_bootstrap_confidence
+        # Log confidence distributions per phase to tune this ratio empirically.
+
+    split:
+      train: 0.85
+      validation: 0.10
+
+      holdout:
+        ratio: 0.05
+        frozen: true
+        note: >
+          Holdout set is permanently frozen after first split.
+          Never add holdout lines to train or validation.
+          Re-evaluate holdout only at major version boundaries (v1, v2, ...).
+          Do not use holdout performance to guide hyperparameter choices.
+
+  phase_8_training:
+    description: >
+      Fine-tune the pretrained model on synthetic printed lines (phase_0b)
+      and corrected Payne Smith lines. Trains separate models for Serto
+      body text and Estrangelo headers.
+
+    # NOTE: --freeze-base 2 is a starting point for print-domain adaptation.
+    # After first training run, experiment with --freeze-base 0 (full unfreeze)
+    # if validation CER does not improve. Log results and tune accordingly.
+    freeze_base_layers: 2
+
+    serto_model:
+      command: |
+        kraken train \
+          --model models/pretrain/vienna_serto.mlmodel \
+          --training-files dataset/train/serto/*.xml \
+                           dataset/synthetic_lines/*.xml \
+          --evaluation-files dataset/validation/serto/*.xml \
+          --output models/finetune/paynesmith_serto_v1.mlmodel \
+          --text-direction rtl \
+          --augment \
+          --freeze-base ${phase_8_training.freeze_base_layers} \
+          --lag 10
+
+    estrangela_model:
+      description: >
+        Trained on TitleZone lines only. If insufficient lines exist
+        initially, fall back to the base Vienna model until more
+        Estrangelo GT is collected.
+      command: |
+        kraken train \
+          --model models/pretrain/vienna_serto.mlmodel \
+          --training-files dataset/train/estrangela/*.xml \
+          --evaluation-files dataset/validation/estrangela/*.xml \
+          --output models/finetune/paynesmith_estrangela_v1.mlmodel \
+          --text-direction rtl \
+          --augment \
+          --freeze-base ${phase_8_training.freeze_base_layers} \
+          --lag 10
+
+    logging:
+      save_config: true
+      save_training_metrics: true
+      save_model_hash: true
+      kraken_version: true
+
+  phase_9_incremental_training:
+    enabled: true
+    random_seed: ${configuration.random_seed}
+
+    behavior: |
+      After each annotation batch:
+
+        kraken train \
+          --model previous_model \
+          --training-files dataset/train/*.xml \
+          --evaluation-files dataset/validation/*.xml \
+          --output next_model
+
+      Then re-run OCR on rejected lines with updated model.
+      Re-compute confidence scores and re-filter rejected set.
+
+  phase_10_language_correction:
+    description: >
+      Apply script-aware lexicon correction to OCR output.
+      Mixed-script lines (Syriac entry + Latin gloss on the same line)
+      are tokenized first; correction is applied per token based on
+      detected script, not per line.
+
+    algorithm:
+      tokenize_first: true
+
+      per_token_script_detection:
+        enabled: true
+        method: unicode_range_lookup
+        syriac_range: [0x0700, 0x074F]
+        latin_range: [0x0041, 0x007A]
+
+      correction_routing:
+        syriac_tokens:
+          method: symspell
+          max_edit_distance: ${configuration.language_correction.symspell_max_edit_distance}
+          lexicon_source:
+            - sedra_dictionary
+            - syriac_wordlist
+            - dukhrana_payne_smith_wordlist # see notes.dukhrana_note
+        latin_tokens:
+          method: symspell
+          max_edit_distance: 1
+          lexicon_source:
+            - latin_english_wordlist
+
+  phase_11_evaluation:
+    command: |
+      kraken test \
+        --model models/finetune/paynesmith_vN.mlmodel \
+        --evaluation-files dataset/holdout/*.xml
+
+    metrics:
+      - cer # overall character error rate
+      - wer # overall word error rate
+      - syriac_cer # CER on Syriac-only tokens
+      - latin_cer # CER on Latin-only tokens
+      - mixed_line_cer # CER on lines containing both scripts
+      - word_accuracy # overall word accuracy
+      - headword_accuracy # accuracy on headword tokens (highest-value)
+
+    notes: >
+      headword_accuracy requires a headword token list derived from
+      the Dukhrana lexicon or a manually compiled list of dictionary headwords.
+
+  phase_12_structure_recovery:
+    description: >
+      Parse OCR output into structured dictionary entries.
+      The Payne Smith dictionary has a regular structure:
+      bold headword → etymology → part of speech → gloss → citations.
+      Structure recovery maximises downstream usability of OCR output.
+
+    fields:
+      - headword_syriac
+      - headword_transliteration
+      - part_of_speech
+      - gloss_english
+      - citations
+
+    method: regex_heuristic_then_llm_verify
+
+    output_format: jsonl
+
+  phase_13_export:
+    formats:
+      page_xml:
+        spec: PAGE_XML_2019
+        output: exports/page_xml
+
+      json_lines:
+        schema:
+          line_id: int
+          image_path: string
+          transcription: string
+          bootstrap_confidence: float
+          corrected: bool
+          phase: int
+          region_type: string # MainZone | TitleZone | MarginZone
+          script_type: string # serto | estrangela
+
+      structured_entries:
+        description: Output of phase_12 structure recovery
+        format: jsonl
+        schema:
+          headword_syriac: string
+          headword_transliteration: string
+          part_of_speech: string
+          gloss_english: string
+          citations: list[string]
+          source_lines: list[int]
+          ocr_confidence: float
+
+dataset_manifest:
+  schema:
+    page_id: int
+    line_count: int
+    corrected: bool
+    training_phase: int
+    region_type: string
+    script_type: string
+
+reproducibility:
+  random_seed: 42
+  # NOTE: random_seed is the single canonical value defined in configuration.
+  # It is referenced here for documentation completeness only.
+  # All phases that use randomness must reference configuration.random_seed.
+
+  logging:
+    save_config: true
+    save_training_metrics: true
+    save_model_hash: true
+    kraken_version: true
+    # Kraken has had breaking changes between minor versions.
+    # Always record the exact installed version alongside model hashes.
+
+  lockfile: uv.lock # committed to version control for full reproducibility
+
+expected_results:
+  with_500_corrected_lines:
+    cer: 5%
+
+  with_1000_corrected_lines:
+    cer: 2-3%
+
+  with_2000_corrected_lines:
+    cer: <2%
+
+  notes: >
+    These targets assume successful domain adaptation from manuscript to
+    printed typeface via phase_0b synthetic augmentation. Without synthetic
+    data, expected CER at 500 lines may be 8-12% due to domain gap.
+    Separate CER targets for Serto and Estrangelo zones should be tracked
+    independently once sufficient GT exists for each.

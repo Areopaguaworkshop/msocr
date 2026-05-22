@@ -1,0 +1,748 @@
+project:
+  name: payne-smith-syriac-ocr-runpod
+  version: 1.0
+  description: >
+    End-to-end pipeline for training a Kraken OCR model on the Vienna 2024
+    Syriac Ground Truth dataset using RunPod cloud GPUs, orchestrated from
+    a local development machine.
+
+    Architecture:
+      - Local machine: orchestration, data prep, code editing, result retrieval
+      - RunPod GPU Pod: all Kraken training and evaluation
+      - RunPod Network Volume: persistent storage shared across pod sessions
+      - runpodctl: CLI bridge between local and remote environments
+
+    Data flow:
+      local (raw GT + code)
+        → rsync/runpodctl → Network Volume
+          → RunPod Pod (training on GPU)
+            → model checkpoints saved to Network Volume
+              → rsync/runpodctl pull → local (trained model)
+
+# ─────────────────────────────────────────────
+# PREREQUISITES (complete before running pipeline)
+# ─────────────────────────────────────────────
+prerequisites:
+
+  runpod_account:
+    - Create account at https://runpod.io
+    - Add billing (minimum $10 to start)
+    - Generate API key: Settings → API Keys → Create (READ/WRITE permissions)
+    - Note your API key for local config
+
+  local_tools:
+    - runpodctl (version >= 1.11.0)
+    - rsync
+    - git + git-lfs
+    - ssh (OpenSSH client)
+    - uv (Python package manager)
+    - An SSH key pair (~/.ssh/id_ed25519 recommended)
+
+  install_runpodctl:
+    macos:   brew install runpod/runpodctl/runpodctl
+    linux:   curl -sL https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-linux-amd64.tar.gz | tar xz -C ~/.local/bin
+    windows: wget https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-windows-amd64.exe -O runpodctl.exe
+
+  configure_runpodctl:
+    command: runpodctl config --apiKey=YOUR_API_KEY
+
+  verify:
+    command: |
+      runpodctl pod list
+      # Should show your pods (empty list is fine if none exist yet)
+
+# ─────────────────────────────────────────────
+# INFRASTRUCTURE SETUP
+# ─────────────────────────────────────────────
+infrastructure:
+
+  network_volume:
+    name: syriac-ocr-vol
+    size_gb: 50
+    region: EUR-IS-1        # Choose closest region with your target GPU available
+    mount_path: /workspace  # Default RunPod mount point
+
+    creation:
+      method: dashboard
+      steps:
+        - Log in → Storage → New Network Volume
+        - Name: syriac-ocr-vol
+        - Region: EUR-IS-1 (or closest available)
+        - Size: 50 GB
+        - Click Create Network Volume
+
+    directory_structure_on_volume:
+      /workspace/
+        dataset/
+          vienna/          # Vienna 2024 ground truth (cloned from GitHub)
+          train/           # Training split XML files
+          validation/      # Validation split XML files
+          holdout/         # Holdout split XML files (frozen)
+        models/
+          pretrain/        # Output: vienna_serto.mlmodel
+          finetune/        # Output: paynesmith_vN.mlmodel
+        logs/              # Kraken training logs and metrics
+        checkpoints/       # Mid-training checkpoints
+        exports/           # Final exported models for download
+
+    cost_estimate:
+      storage_per_month: ~$2.50/month for 50 GB
+      note: Storage cost is charged continuously. Compute is only charged while a pod is running.
+
+  gpu_pod:
+    name: syriac-ocr-trainer
+
+    recommended_gpus:
+      budget:
+        gpu: RTX 3090
+        vram_gb: 24
+        approx_cost_per_hr: $0.44
+        note: Sufficient for Kraken training at standard batch sizes.
+      balanced:
+        gpu: RTX A5000
+        vram_gb: 24
+        approx_cost_per_hr: $0.52
+        note: Good price/performance for extended training runs.
+      fast:
+        gpu: A100 SXM 80GB
+        vram_gb: 80
+        approx_cost_per_hr: $2.09
+        note: Best for fastest iteration; overkill for Kraken but useful if scaling.
+
+    docker_image: runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+    # Kraken requires CUDA 11.x. Do not use CUDA 12.x images without testing.
+
+    compute_type: ON_DEMAND
+    # Use ON_DEMAND (not SPOT) for training to avoid eviction mid-run.
+
+    network_volume_attachment:
+      volume: syriac-ocr-vol
+      mount_path: /workspace
+
+    exposed_ports:
+      - 22    # SSH access
+      - 8888  # JupyterLab (optional monitoring)
+
+    container_disk_gb: 20
+    # Scratch space for pip cache, OS, temp files. Not persistent.
+
+    creation_via_cli:
+      command: |
+        runpodctl pod create \
+          --image runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04 \
+          --gpu-id NVIDIA_RTX_A5000 \
+          --name syriac-ocr-trainer \
+          --ssh \
+          --template-id pytorch-template \
+          --volume-id YOUR_VOLUME_ID \
+          --volume-mount /workspace \
+          --disk 20
+      note: >
+        Replace YOUR_VOLUME_ID with the ID from: runpodctl pod list --output yaml
+        Or create the pod from the RunPod dashboard and attach the volume there.
+
+    get_ssh_connection:
+      command: |
+        runpodctl pod get YOUR_POD_ID
+        # Look for: publicIp and tcpPort22 in the output
+      ssh_command: |
+        ssh root@PUBLIC_IP -p TCP_PORT_22 -i ~/.ssh/id_ed25519
+
+    add_ssh_key_to_runpod:
+      dashboard: Settings → SSH Keys → Add Public Key
+      command:   runpodctl ssh add-key --key "$(cat ~/.ssh/id_ed25519.pub)"
+
+# ─────────────────────────────────────────────
+# LOCAL ENVIRONMENT SETUP
+# ─────────────────────────────────────────────
+local_setup:
+
+  steps:
+
+    - name: create_local_project
+      run_on: local
+      command: |
+        uv init payne-smith-ocr
+        cd payne-smith-ocr
+        uv python install 3.11
+        uv venv
+        uv add kraken numpy pillow tqdm pandas \
+               scikit-image scikit-learn pyyaml orjson rich
+        uv lock
+
+    - name: clone_vienna_ground_truth
+      run_on: local
+      command: |
+        git lfs install
+        git clone https://github.com/HTR-School-Vienna/2024--Syriac.git \
+          dataset/vienna
+      output_size_estimate: ~500 MB (includes images and XML)
+
+    - name: inspect_vienna_dataset
+      run_on: local
+      command: |
+        find dataset/vienna -name "*.xml" | wc -l   # Count PAGE XML files
+        find dataset/vienna -name "*.png" | wc -l   # Count images
+        ls dataset/vienna/
+      expected_structure: |
+        dataset/vienna/
+          *.png          # Page images
+          *.xml          # PAGE XML ground truth files
+          README.md
+
+# ─────────────────────────────────────────────
+# DATA TRANSFER: LOCAL → RUNPOD NETWORK VOLUME
+# ─────────────────────────────────────────────
+data_transfer:
+
+  method: rsync_over_ssh
+  description: >
+    Transfer the Vienna GT dataset from your local machine to the RunPod
+    Network Volume. Only needs to be done once per volume (data persists).
+
+  steps:
+
+    - name: get_pod_connection_details
+      run_on: local
+      command: |
+        runpodctl pod list --output table
+        # Note POD_ID, then:
+        runpodctl pod get YOUR_POD_ID
+        # Note: publicIp and tcpPort22 values
+
+    - name: verify_ssh_connection
+      run_on: local
+      command: |
+        ssh root@PUBLIC_IP -p TCP_PORT_22 -i ~/.ssh/id_ed25519 "echo SSH OK"
+
+    - name: transfer_vienna_dataset
+      run_on: local
+      command: |
+        rsync -avzP --progress \
+          -e "ssh -p TCP_PORT_22 -i ~/.ssh/id_ed25519" \
+          dataset/vienna/ \
+          root@PUBLIC_IP:/workspace/dataset/vienna/
+      estimated_time: 5-20 min depending on connection speed and dataset size
+
+    - name: transfer_training_scripts
+      run_on: local
+      command: |
+        rsync -avzP \
+          -e "ssh -p TCP_PORT_22 -i ~/.ssh/id_ed25519" \
+          scripts/ \
+          root@PUBLIC_IP:/workspace/scripts/
+
+    - name: verify_transfer
+      run_on: pod_ssh
+      command: |
+        find /workspace/dataset/vienna -name "*.xml" | wc -l
+        du -sh /workspace/dataset/
+
+  alternative_method_runpodctl_send:
+    description: >
+      For smaller individual files, use runpodctl send/receive.
+      Less suitable for large directory transfers than rsync.
+    local_command: |
+      runpodctl send dataset/vienna/some_file.xml
+      # Output: code is: XXXX-word-word-word
+    pod_command: |
+      runpodctl receive XXXX-word-word-word
+
+# ─────────────────────────────────────────────
+# POD ENVIRONMENT SETUP (run once after pod creation)
+# ─────────────────────────────────────────────
+pod_setup:
+
+  run_on: pod_ssh
+  note: >
+    SSH into the pod and run these commands once.
+    All installs go to /workspace to persist across pod restarts.
+
+  steps:
+
+    - name: verify_gpu
+      command: |
+        nvidia-smi
+        python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0))"
+
+    - name: install_uv
+      command: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        source ~/.bashrc
+
+    - name: install_kraken_and_dependencies
+      command: |
+        cd /workspace
+        uv venv --python 3.10   # Match pod Python version
+        source .venv/bin/activate
+        uv pip install kraken numpy pillow tqdm pandas \
+                       scikit-image scikit-learn pyyaml orjson rich
+        # Verify Kraken sees GPU
+        python -c "import torch; print(torch.cuda.is_available())"
+        kraken --version
+
+    - name: create_workspace_directories
+      command: |
+        mkdir -p /workspace/dataset/{vienna,train,validation,holdout}
+        mkdir -p /workspace/models/{pretrain,finetune}
+        mkdir -p /workspace/logs
+        mkdir -p /workspace/checkpoints
+        mkdir -p /workspace/exports
+
+    - name: install_git_lfs_on_pod
+      command: |
+        apt-get update && apt-get install -y git-lfs
+        git lfs install
+
+    - name: create_activation_alias
+      command: |
+        echo 'alias activate="source /workspace/.venv/bin/activate"' >> ~/.bashrc
+        source ~/.bashrc
+
+    - name: configure_screen_or_tmux
+      description: >
+        Essential: training runs may take hours. Use tmux or screen so
+        training continues even if your SSH connection drops.
+      command: |
+        apt-get install -y tmux
+        # Start a persistent session before running training:
+        # tmux new -s training
+        # To reattach after disconnect: tmux attach -t training
+
+# ─────────────────────────────────────────────
+# DATASET PREPARATION (run on pod)
+# ─────────────────────────────────────────────
+dataset_preparation:
+
+  run_on: pod_ssh
+  working_directory: /workspace
+
+  configuration:
+    random_seed: 42
+    total_xml_files: auto_detect   # Count from cloned Vienna repo
+    train_ratio: 0.85
+    validation_ratio: 0.10
+    holdout_ratio: 0.05
+
+  steps:
+
+    - name: inspect_and_validate_vienna_gt
+      command: |
+        source .venv/bin/activate
+        python - <<'EOF'
+        import glob, os
+        from pathlib import Path
+
+        xml_files = glob.glob("/workspace/dataset/vienna/**/*.xml", recursive=True)
+        print(f"Total XML ground truth files: {len(xml_files)}")
+
+        # Verify each XML has a corresponding image
+        missing = []
+        for xml in xml_files:
+            p = Path(xml)
+            for ext in [".png", ".jpg", ".tif"]:
+                if p.with_suffix(ext).exists():
+                    break
+            else:
+                missing.append(xml)
+
+        if missing:
+            print(f"WARNING: {len(missing)} XML files have no matching image:")
+            for f in missing[:10]:
+                print(f"  {f}")
+        else:
+            print("All XML files have matching images. Dataset is clean.")
+        EOF
+
+    - name: split_dataset
+      description: >
+        Deterministic train/validation/holdout split using fixed random seed.
+        Holdout is frozen permanently — never used for hyperparameter tuning.
+      command: |
+        source .venv/bin/activate
+        python - <<'EOF'
+        import glob, random, shutil, json
+        from pathlib import Path
+
+        SEED = 42
+        random.seed(SEED)
+
+        xml_files = sorted(glob.glob("/workspace/dataset/vienna/**/*.xml", recursive=True))
+        random.shuffle(xml_files)
+
+        n = len(xml_files)
+        n_holdout    = max(1, int(n * 0.05))
+        n_validation = max(1, int(n * 0.10))
+        n_train      = n - n_holdout - n_validation
+
+        holdout    = xml_files[:n_holdout]
+        validation = xml_files[n_holdout:n_holdout + n_validation]
+        train      = xml_files[n_holdout + n_validation:]
+
+        print(f"Dataset split (seed={SEED}):")
+        print(f"  Total:      {n}")
+        print(f"  Train:      {len(train)}")
+        print(f"  Validation: {len(validation)}")
+        print(f"  Holdout:    {len(holdout)}  ← frozen, never modify")
+
+        def copy_split(files, dest_dir):
+            dest = Path(dest_dir)
+            dest.mkdir(parents=True, exist_ok=True)
+            for xml in files:
+                p = Path(xml)
+                shutil.copy2(xml, dest / p.name)
+                for ext in [".png", ".jpg", ".tif"]:
+                    img = p.with_suffix(ext)
+                    if img.exists():
+                        shutil.copy2(img, dest / img.name)
+                        break
+
+        copy_split(train,      "/workspace/dataset/train")
+        copy_split(validation, "/workspace/dataset/validation")
+        copy_split(holdout,    "/workspace/dataset/holdout")
+
+        # Save manifest for reproducibility
+        manifest = {
+            "seed": SEED,
+            "total": n,
+            "train": [str(Path(f).name) for f in train],
+            "validation": [str(Path(f).name) for f in validation],
+            "holdout": [str(Path(f).name) for f in holdout],
+        }
+        with open("/workspace/dataset/split_manifest.json", "w") as f:
+            json.dump(manifest, f, indent=2)
+        print("Manifest saved to /workspace/dataset/split_manifest.json")
+        EOF
+
+    - name: verify_split
+      command: |
+        echo "Train files:      $(ls /workspace/dataset/train/*.xml | wc -l)"
+        echo "Validation files: $(ls /workspace/dataset/validation/*.xml | wc -l)"
+        echo "Holdout files:    $(ls /workspace/dataset/holdout/*.xml | wc -l)"
+
+# ─────────────────────────────────────────────
+# PHASE 0: PRETRAIN ON VIENNA 2024 GT
+# ─────────────────────────────────────────────
+phase_0_pretrain:
+
+  run_on: pod_ssh
+  working_directory: /workspace
+  use_tmux: true   # REQUIRED — training takes 1-4 hours
+
+  pre_flight_checks:
+    - nvidia-smi                           # GPU is visible
+    - source .venv/bin/activate            # venv is active
+    - kraken --version                     # Kraken is installed
+    - ls /workspace/dataset/train/*.xml | head -5   # training data exists
+
+  command: |
+    source .venv/bin/activate
+    tmux new -s pretrain   # Start in a new tmux session
+
+    kraken \
+      -d cuda:0 \
+      train \
+        --ground-truth /workspace/dataset/train/*.xml \
+        --evaluation-files /workspace/dataset/validation/*.xml \
+        --output /workspace/models/pretrain/vienna_serto \
+        --resize add \
+        --load /workspace/models/pretrain/vienna_serto.mlmodel \
+        --text-direction rtl \
+        --augment \
+        --lag 10 \
+        --min-epochs 20 \
+        --max-epochs 100 \
+        --batch-size 16 \
+        --workers 4 \
+        2>&1 | tee /workspace/logs/pretrain_$(date +%Y%m%d_%H%M%S).log
+
+  flags_explained:
+    -d cuda:0:          Use first GPU (essential — without this Kraken uses CPU)
+    --resize add:       Handle characters in GT not seen during pretraining
+    --lag 10:           Stop if no improvement for 10 epochs (early stopping)
+    --min-epochs 20:    Train at least 20 epochs before early stopping can trigger
+    --max-epochs 100:   Hard cap to prevent runaway training costs
+    --batch-size 16:    Tune down to 8 if OOM errors occur
+    --workers 4:        Parallel data loading; tune to pod CPU count
+    --augment:          Data augmentation (rotation, noise) to improve generalization
+
+  output:
+    model:  /workspace/models/pretrain/vienna_serto.mlmodel
+    logs:   /workspace/logs/pretrain_*.log
+
+  monitoring:
+    watch_log: |
+      # In a second tmux pane (Ctrl+B then "):
+      tail -f /workspace/logs/pretrain_*.log | grep -E "(epoch|CER|loss|val_)"
+    check_gpu: |
+      watch -n 5 nvidia-smi
+
+  expected_cer: 10-15%
+  expected_duration: 1-4 hours depending on GPU and dataset size
+
+  on_oom_error:
+    action: reduce batch size
+    command: |
+      # Add --batch-size 8 instead of 16
+      # Or add --workers 2
+
+# ─────────────────────────────────────────────
+# PHASE 1: EVALUATION ON HOLDOUT
+# ─────────────────────────────────────────────
+phase_1_evaluate:
+
+  run_on: pod_ssh
+
+  command: |
+    source .venv/bin/activate
+    kraken \
+      -d cuda:0 \
+      test \
+        --model /workspace/models/pretrain/vienna_serto.mlmodel \
+        --evaluation-files /workspace/dataset/holdout/*.xml \
+        --text-direction rtl \
+      2>&1 | tee /workspace/logs/eval_pretrain_$(date +%Y%m%d_%H%M%S).log
+
+  metrics_to_record:
+    - CER (character error rate)
+    - WER (word error rate)
+    - Accuracy
+
+  note: >
+    Record these metrics as your Vienna baseline before any Payne Smith
+    fine-tuning. This is the reference point for measuring improvement.
+
+# ─────────────────────────────────────────────
+# RESULT RETRIEVAL: RUNPOD → LOCAL
+# ─────────────────────────────────────────────
+result_retrieval:
+
+  description: >
+    Pull trained models, logs, and evaluation results from the RunPod
+    Network Volume back to your local machine after training completes.
+
+  method_1_rsync:
+    description: Best for syncing entire directories after a training run.
+    command: |
+      # Pull trained model
+      rsync -avzP \
+        -e "ssh -p TCP_PORT_22 -i ~/.ssh/id_ed25519" \
+        root@PUBLIC_IP:/workspace/models/ \
+        ./models/
+
+      # Pull training logs
+      rsync -avzP \
+        -e "ssh -p TCP_PORT_22 -i ~/.ssh/id_ed25519" \
+        root@PUBLIC_IP:/workspace/logs/ \
+        ./logs/
+
+  method_2_runpodctl_receive:
+    description: For sending specific files from pod to local.
+    pod_command: |
+      runpodctl send /workspace/models/pretrain/vienna_serto.mlmodel
+      # Outputs: code is: XXXX-word-word-word
+    local_command: |
+      runpodctl receive XXXX-word-word-word
+
+  verify_model_locally:
+    command: |
+      source .venv/bin/activate
+      kraken show models/pretrain/vienna_serto.mlmodel
+      # Should show model metadata including script and codec size
+
+# ─────────────────────────────────────────────
+# POD LIFECYCLE MANAGEMENT
+# ─────────────────────────────────────────────
+pod_lifecycle:
+
+  critical_rule: >
+    ALWAYS stop the pod when training is not actively running.
+    GPU compute is charged by the minute even when idle.
+    Network Volume storage is cheap (~$0.07/GB/month) and persists safely.
+
+  stop_pod:
+    dashboard: Pods → Your Pod → Stop
+    cli:       runpodctl pod stop YOUR_POD_ID
+
+  restart_pod:
+    description: >
+      When you restart the pod, the Network Volume re-attaches automatically.
+      All models, datasets, and logs on /workspace are preserved.
+      The container disk (pip cache, /tmp) is reset — run pod_setup venv
+      activation only (no need to reinstall if venv is on /workspace).
+    cli: runpodctl pod start YOUR_POD_ID
+
+  check_pod_status:
+    cli: runpodctl pod list --output table
+
+  reconnect_after_restart:
+    command: |
+      # Get new public IP (may change on restart)
+      runpodctl pod get YOUR_POD_ID
+      ssh root@NEW_PUBLIC_IP -p NEW_TCP_PORT -i ~/.ssh/id_ed25519
+
+  resume_training_after_restart:
+    note: >
+      Kraken does not auto-resume from checkpoints. If training was
+      interrupted, restart from the last saved .mlmodel file using --load.
+    command: |
+      source .venv/bin/activate
+      tmux new -s resume
+
+      kraken \
+        -d cuda:0 \
+        train \
+          --ground-truth /workspace/dataset/train/*.xml \
+          --evaluation-files /workspace/dataset/validation/*.xml \
+          --load /workspace/models/pretrain/vienna_serto.mlmodel \
+          --output /workspace/models/pretrain/vienna_serto \
+          --text-direction rtl \
+          --augment \
+          --lag 10 \
+          2>&1 | tee /workspace/logs/resume_$(date +%Y%m%d_%H%M%S).log
+
+  delete_pod_when_done:
+    description: >
+      When all training is complete and models are retrieved locally,
+      delete the pod to stop all charges. Volume data remains safe.
+    cli:       runpodctl pod delete YOUR_POD_ID
+    dashboard: Pods → Your Pod → Terminate
+
+# ─────────────────────────────────────────────
+# REAL-TIME SYNC WORKFLOW (optional)
+# ─────────────────────────────────────────────
+realtime_sync:
+
+  description: >
+    For active development (editing training scripts locally and running
+    them on the pod), use runpodctl project dev for live sync.
+    Changes to local files propagate to the pod in real time.
+
+  setup:
+    command: |
+      # In your local project directory:
+      runpodctl project create
+      # Follow prompts to link to your pod and network volume
+      runpodctl project dev
+      # From this point, local edits auto-sync to /workspace on the pod
+
+  use_case: >
+    Useful when iterating on preprocessing scripts or training config.
+    Not needed for a single long training run — just SSH + tmux suffices.
+
+# ─────────────────────────────────────────────
+# COST MANAGEMENT
+# ─────────────────────────────────────────────
+cost_management:
+
+  estimates:
+    network_volume_50gb:
+      rate: ~$0.07/GB/month
+      monthly: ~$3.50/month
+      note: Charged continuously regardless of pod status.
+
+    rtx_a5000_on_demand:
+      rate: ~$0.52/hr
+      training_run_4hr: ~$2.08
+      note: Only charged while pod is RUNNING.
+
+    a100_80gb_on_demand:
+      rate: ~$2.09/hr
+      training_run_2hr: ~$4.18
+
+  cost_saving_tips:
+    - Stop pod immediately after training completes.
+    - Use runpodctl pod stop, not just closing the terminal.
+    - Set a calendar reminder if starting a long training run.
+    - Monitor GPU utilization with nvidia-smi — if GPU is idle, something is wrong.
+    - For experimentation, use a cheaper GPU (RTX 3090) before scaling up.
+    - Download models to local before deleting a pod.
+
+  budget_estimate_full_vienna_pretrain:
+    volume_1_month: $3.50
+    training_2_to_4_hrs_a5000: $1.04 - $2.08
+    total_estimated: $4.54 - $5.58
+    note: >
+      Subsequent fine-tuning runs on Payne Smith data are additional cost.
+      Budget ~$1-3 per fine-tuning iteration.
+
+# ─────────────────────────────────────────────
+# TROUBLESHOOTING
+# ─────────────────────────────────────────────
+troubleshooting:
+
+  kraken_using_cpu_not_gpu:
+    symptom: Training is slow, nvidia-smi shows 0% GPU utilization
+    fix: |
+      Always pass -d cuda:0 before the train subcommand:
+      kraken -d cuda:0 train ...
+
+  ssh_connection_refused:
+    symptom: ssh: connect to host ... port ...: Connection refused
+    fix: |
+      1. Check pod is RUNNING: runpodctl pod list
+      2. Get fresh IP/port: runpodctl pod get YOUR_POD_ID
+      3. Confirm SSH key is added to RunPod: Settings → SSH Keys
+      4. Try web terminal from dashboard as fallback
+
+  pod_ip_changed_after_restart:
+    symptom: SSH fails after pod restart
+    fix: |
+      runpodctl pod get YOUR_POD_ID
+      # Use new publicIp and tcpPort22 values
+
+  kraken_oom_out_of_memory:
+    symptom: CUDA out of memory error during training
+    fix: |
+      Reduce --batch-size (try 8, then 4)
+      Reduce --workers (try 2)
+      Ensure no other processes are using GPU: nvidia-smi
+
+  training_stopped_after_disconnect:
+    symptom: Training process died when SSH session ended
+    fix: |
+      Always use tmux before starting training:
+        tmux new -s training
+        [run training command]
+        Ctrl+B then D  # detach, leaves training running
+      To reattach: tmux attach -t training
+
+  vienna_xml_parse_error:
+    symptom: Kraken fails with XML parsing error on Vienna GT files
+    fix: |
+      Vienna 2024 uses PAGE XML format. Verify Kraken version supports it:
+        kraken --version   # needs >= 4.3.x for reliable PAGE XML support
+      Validate one file:
+        python -c "from lxml import etree; etree.parse('file.xml'); print('OK')"
+
+  rsync_permission_denied:
+    symptom: rsync fails with permission denied
+    fix: |
+      Confirm SSH key is correct:
+        ssh -v root@PUBLIC_IP -p PORT -i ~/.ssh/id_ed25519
+      Confirm key was added to RunPod:
+        runpodctl ssh add-key --key "$(cat ~/.ssh/id_ed25519.pub)"
+
+# ─────────────────────────────────────────────
+# REPRODUCIBILITY
+# ─────────────────────────────────────────────
+reproducibility:
+
+  random_seed: 42
+
+  record_after_each_run:
+    - kraken version: kraken --version >> /workspace/logs/versions.txt
+    - torch version:  python -c "import torch; print(torch.__version__)" >> /workspace/logs/versions.txt
+    - cuda version:   nvcc --version >> /workspace/logs/versions.txt
+    - split manifest: /workspace/dataset/split_manifest.json
+    - model hash:     sha256sum /workspace/models/pretrain/vienna_serto.mlmodel
+
+  commit_to_version_control:
+    items:
+      - split_manifest.json    # exact train/val/holdout file lists
+      - uv.lock                # pinned Python dependencies
+      - logs/versions.txt      # software versions used
+      - pipeline YAML          # this file
+    note: >
+      Do NOT commit model files to git (too large).
+      Use runpodctl send or rsync to archive models separately.

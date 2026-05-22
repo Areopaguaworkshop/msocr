@@ -1,0 +1,75 @@
+schema_version: msocr.docspec.v1
+id: skill.post_ocr_correction
+title: Post OCR and HTR Correction Skill
+purpose: Apply conservative normalization and lexicon-guided correction with provenance.
+scope:
+  project: msocr
+  languages:
+    - name: sogdian
+      status: planned
+    - name: old_turkish
+      status: planned
+    - name: greek
+      status: planned
+    - name: latin
+      status: planned
+    - name: syriac
+      status: planned
+    - name: coptic
+      status: planned
+  writing_modes:
+    - printed
+    - handwritten
+inputs:
+  required:
+    - raw_text
+    - target_language
+    - direction
+  optional:
+    - lexicon_source
+    - morphology_source
+    - normalization_profile
+workflow:
+  - step_id: P1
+    name: normalize_text
+    action: Apply language profile normalization policy.
+  - step_id: P2
+    name: lexicon_validation
+    action: Validate token candidates against configured lexicon.
+  - step_id: P3
+    name: conservative_correction
+    action: Apply bounded edit-distance correction only when confidence is sufficient.
+metrics:
+  primary:
+    - correction_acceptance_rate
+  secondary:
+    - lexicon_hit_rate
+thresholds:
+  correction:
+    max_edit_distance: 2
+    min_token_confidence: 0.85
+  rule: Skip aggressive correction if confidence is below threshold.
+fallback:
+  uncertain_correction:
+    - preserve_raw_output
+    - emit_normalized_only
+    - set_needs_manual_review_true
+outputs:
+  artifacts:
+    - raw_ocr
+    - normalized_text
+    - corrected_text
+    - token_provenance
+integration:
+  implemented_modules:
+    - msocr/models/inference.py
+  planned_modules:
+    - lexicon_validation_module
+    - morphology_lookup_module
+status:
+  maturity: planned_for_code
+  implementation_state: documentation_defined
+owners:
+  - role: postprocessing
+    team: msocr
+last_updated: 2026-02-12

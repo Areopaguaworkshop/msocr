@@ -1,0 +1,194 @@
+pipeline:
+  name: msocr_syriac_printed_train_delegate
+  identifier: msocr_syriac_printed_train_delegate
+  projectIdentifier: msocr
+  orgIdentifier: default
+  tags:
+    route: syriac-printed
+    owner: msocr
+    runtime: delegate
+  variables:
+    - name: delegateSelector
+      type: String
+      value: local
+    - name: manifestId
+      type: String
+      value: <+input>
+    - name: benchmarkManifestId
+      type: String
+      value: <+input>
+    - name: scriptVariant
+      type: String
+      value: estrangela
+    - name: sequenceId
+      type: String
+      value: <+pipeline.sequenceId.toString()>
+    - name: runpodModelPath
+      type: String
+      value: /workspace/output/model.traineddata
+    - name: trainingImage
+      type: String
+      value: runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+    - name: harRegistry
+      type: String
+      value: msocr-models
+    - name: harFilename
+      type: String
+      value: model.traineddata
+    - name: notificationUrl
+      type: String
+      value: <+input>
+    - name: runtimePort
+      type: String
+      value: "18000"
+  stages:
+    - stage:
+        name: TrainEvaluatePromote
+        identifier: TrainEvaluatePromote
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: PipelineSubmit
+                  identifier: PipelineSubmit
+                  type: ShellScript
+                  timeout: 6h
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          set -euo pipefail
+
+                          export RUNPOD_API_KEY="<+secrets.getValue(\"RUNPOD_API_KEY\")>"
+                          export HARNESS_API_TOKEN="<+secrets.getValue(\"HARNESS_API_TOKEN\")>"
+                          export HARNESS_ACCOUNT_ID="<+account.identifier>"
+                          export HARNESS_ORG_ID="<+org.identifier>"
+                          export HARNESS_PROJECT_ID="<+project.identifier>"
+                          export RUNPOD_SSH_KEY_PATH="/opt/harness-delegate/secrets/runpod/id_ed25519"
+                          export RUNPOD_SSH_PUBLIC_KEY="<+secrets.getValue(\"RUNPOD_SSH_PUBLIC_KEY\")>"
+                          export MSOCR_NOTIFICATION_URL="<+pipeline.variables.notificationUrl>"
+
+                          uv run msocr pipeline-submit \
+                            --execute \
+                            --manifest-id "<+pipeline.variables.manifestId>" \
+                            --benchmark-manifest-id "<+pipeline.variables.benchmarkManifestId>" \
+                            --lang syriac \
+                            --script-variant "<+pipeline.variables.scriptVariant>" \
+                            --writing-mode printed \
+                            --trainer tesstrain \
+                            --sequence-id "<+pipeline.variables.sequenceId>" \
+                            --model-version "<+pipeline.sequenceId.toString()>" \
+                            --runpod-model-path "<+pipeline.variables.runpodModelPath>" \
+                            --runpod-ssh-key "$RUNPOD_SSH_KEY_PATH" \
+                            --runpod-ssh-public-key "$RUNPOD_SSH_PUBLIC_KEY" \
+                            --registry "<+pipeline.variables.harRegistry>" \
+                            --pkg-url https://pkg.harness.io \
+                            --training-image "<+pipeline.variables.trainingImage>" \
+                            --gpu-tier auto \
+                            --dockerfile Dockerfile
+              - step:
+                  name: RuntimePrefetchSmokeTest
+                  identifier: RuntimePrefetchSmokeTest
+                  type: ShellScript
+                  timeout: 30m
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          set -euo pipefail
+
+                          export HARNESS_API_TOKEN="<+secrets.getValue(\"HARNESS_API_TOKEN\")>"
+                          export HARNESS_ACCOUNT_ID="<+account.identifier>"
+                          export HARNESS_ORG_ID="<+org.identifier>"
+                          export HARNESS_PROJECT_ID="<+project.identifier>"
+                          export MSOCR_RUNTIME_HAR_REGISTRY="<+pipeline.variables.harRegistry>"
+                          export MSOCR_RUNTIME_HAR_PACKAGE="syr-<+pipeline.variables.scriptVariant>-printed"
+                          export MSOCR_RUNTIME_HAR_VERSION="v<+pipeline.variables.sequenceId>"
+                          export MSOCR_RUNTIME_HAR_FILENAME="<+pipeline.variables.harFilename>"
+                          export MSOCR_RUNTIME_HAR_CACHE_DIR="models/runtime"
+
+                          uv run python - <<'PY'
+                          from msocr.service.runtime import prefetch_printed_runtime_model_from_env
+                          path = prefetch_printed_runtime_model_from_env()
+                          if path is None:
+                              raise SystemExit("runtime prefetch did not resolve a model")
+                          print(path)
+                          PY
+        delegateSelectors:
+          - <+pipeline.variables.delegateSelector>
+    - stage:
+        name: DeployRuntimeSmoke
+        identifier: DeployRuntimeSmoke
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  name: LaunchAndProbeApiRuntime
+                  identifier: LaunchAndProbeApiRuntime
+                  type: ShellScript
+                  timeout: 45m
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          set -euo pipefail
+
+                          command -v tesseract >/dev/null 2>&1 || {
+                            echo "tesseract is required on the delegate for runtime OCR smoke validation" >&2
+                            exit 1
+                          }
+
+                          export HARNESS_API_TOKEN="<+secrets.getValue(\"HARNESS_API_TOKEN\")>"
+                          export HARNESS_ACCOUNT_ID="<+account.identifier>"
+                          export HARNESS_ORG_ID="<+org.identifier>"
+                          export HARNESS_PROJECT_ID="<+project.identifier>"
+                          export MSOCR_RUNTIME_HAR_REGISTRY="<+pipeline.variables.harRegistry>"
+                          export MSOCR_RUNTIME_HAR_PACKAGE="syr-<+pipeline.variables.scriptVariant>-printed"
+                          export MSOCR_RUNTIME_HAR_VERSION="v<+pipeline.variables.sequenceId>"
+                          export MSOCR_RUNTIME_HAR_FILENAME="<+pipeline.variables.harFilename>"
+                          export MSOCR_RUNTIME_HAR_CACHE_DIR="models/runtime"
+                          export MSOCR_RUNTIME_SMOKE_LANG="syriac"
+                          export MSOCR_RUNTIME_SMOKE_VARIANT="<+pipeline.variables.scriptVariant>"
+
+                          RUNTIME_PORT="<+pipeline.variables.runtimePort>"
+                          LOG_DIR="output/pipelines/runtime-smoke"
+                          LOG_PATH="$LOG_DIR/api.log"
+
+                          mkdir -p "$LOG_DIR"
+
+                          uv run msocr api \
+                            --host 127.0.0.1 \
+                            --port "$RUNTIME_PORT" \
+                            >"$LOG_PATH" 2>&1 &
+                          API_PID=$!
+
+                          cleanup() {
+                            if kill -0 "$API_PID" >/dev/null 2>&1; then
+                              kill "$API_PID" >/dev/null 2>&1 || true
+                              wait "$API_PID" >/dev/null 2>&1 || true
+                            fi
+                            test -f "$LOG_PATH" && tail -n 50 "$LOG_PATH" || true
+                          }
+                          trap cleanup EXIT
+
+                          uv run msocr runtime-smoke-check \
+                            --lang syriac \
+                            --variant "<+pipeline.variables.scriptVariant>" \
+                            --base-url "http://127.0.0.1:${RUNTIME_PORT}" \
+                            --image assets/runtime/syriac_estrangela_smoke.png \
+                            --engine tesseract \
+                            --timeout 120 \
+                            --poll-interval 3
+        delegateSelectors:
+          - <+pipeline.variables.delegateSelector>
