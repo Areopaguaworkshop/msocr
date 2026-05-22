@@ -1,0 +1,68 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing / CI
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Project runtime artifacts
+output/
+test/
+
+# Large model files (downloaded separately)
+models/kraken/
+models/tesseract/
+models/pretrain/
+models/SyriacLexiconheader/
+models/runtime/
+models/*.mlmodel
+
+# Large dataset files
+dataset/
+
+# Documentation build
+docs/_build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker context (would bloat the image)
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+assets/
+instruction/
+skill/
+.swarm/
+.planning/

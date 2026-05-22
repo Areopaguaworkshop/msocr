@@ -1,5 +1,8 @@
 # msocr
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/downloads/)
+
 Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract integration, benchmark reporting, FastAPI service APIs, and Gradio demo UI.
 
 ## Current Status
@@ -44,7 +47,7 @@ Manuscript OCR/HTR toolkit with route-aware language handling, Kraken/Tesseract 
 ## Installation
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/areopagusworkshop/msocr.git
 cd msocr
 uv sync
 ```
@@ -345,3 +348,11 @@ msocr/
 - `models/` and `output/` are runtime artifact directories and are gitignored.
 - OCRopus/Ocropy fallback is deactivated in the current implementation phase.
 - Default training method for Syriac Payne-Smith pipeline is RunPod (persistent pod), see `pipeline/runpod_train_reference.md`.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, conventions, and pull request guidelines.
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
