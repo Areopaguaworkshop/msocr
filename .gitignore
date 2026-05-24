@@ -144,3 +144,5 @@ test/
 # Planning and development artifacts
 .swarm/
 .planning/
+# CocoIndex Code (ccc)
+/.cocoindex_code/
