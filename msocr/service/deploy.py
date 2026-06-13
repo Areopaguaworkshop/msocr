@@ -1,4 +1,4 @@
-"""Deployment-oriented startup and smoke-check helpers for runtime services."""
+"""Deployment-oriented startup and smoke-check helpers for the HTR service."""
 
 from __future__ import annotations
 
@@ -14,26 +14,7 @@ from urllib import error, request
 import uvicorn
 
 from msocr.language_registry import normalize_language_code
-from msocr.service.runtime import (
-    resolve_htr_runtime_model_path,
-    resolve_printed_runtime_model_path,
-    run_htr_service,
-    run_printed_service,
-)
-
-
-RUNTIME_SMOKE_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "runtime"
-DEFAULT_RUNTIME_SMOKE_IMAGE = RUNTIME_SMOKE_ASSET_DIR / "syriac_estrangela_smoke.png"
-
-
-def _runtime_source(model: Optional[str]) -> str:
-    if model:
-        return "explicit"
-    if os.getenv("MSOCR_RUNTIME_MODEL_PATH", "").strip():
-        return "env_path"
-    if os.getenv("MSOCR_RUNTIME_HAR_REGISTRY", "").strip():
-        return "har"
-    return "default_route"
+from msocr.service.runtime import resolve_htr_runtime_model_path, run_htr_service
 
 
 def _htr_runtime_source(model: Optional[str]) -> str:
@@ -41,17 +22,11 @@ def _htr_runtime_source(model: Optional[str]) -> str:
         return "explicit"
     if os.getenv("MSOCR_HTR_RUNTIME_MODEL_PATH", "").strip():
         return "env_path"
-    if os.getenv("MSOCR_HTR_RUNTIME_HAR_REGISTRY", "").strip():
-        return "har"
+    if os.getenv("MSOCR_HTR_MODEL_PATH", "").strip():
+        return "env_path"
+    if os.getenv("MSOCR_RUNTIME_MODEL_PATH", "").strip():
+        return "env_path"
     return "default_route"
-
-
-def canonical_runtime_smoke_image() -> Path:
-    if not DEFAULT_RUNTIME_SMOKE_IMAGE.exists():
-        raise FileNotFoundError(
-            f"Canonical runtime smoke image not found: {DEFAULT_RUNTIME_SMOKE_IMAGE}"
-        )
-    return DEFAULT_RUNTIME_SMOKE_IMAGE
 
 
 def _build_runtime_url(base_url: str, path: str) -> str:
@@ -130,91 +105,12 @@ def wait_for_runtime_health(
         time.sleep(poll_interval_sec)
 
 
-def runtime_http_smoke_check(
-    *,
-    base_url: str,
-    language: str,
-    script_variant: str,
-    image_path: Optional[Path] = None,
-    engine: str = "auto",
-    device: str = "cpu",
-    reference_text_path: Optional[str] = None,
-    cer_threshold: float = 0.05,
-    timeout_sec: int = 120,
-    poll_interval_sec: int = 3,
-) -> Dict[str, Any]:
-    normalized_language = normalize_language_code(language)
-    resolved_image_path = image_path or canonical_runtime_smoke_image()
-    if not resolved_image_path.exists():
-        raise FileNotFoundError(f"Runtime smoke image not found: {resolved_image_path}")
-
-    health_payload = wait_for_runtime_health(
-        base_url=base_url,
-        timeout_sec=timeout_sec,
-        poll_interval_sec=poll_interval_sec,
-    )
-
-    fields = {
-        "lang": normalized_language,
-        "variant": script_variant,
-        "engine": engine,
-        "device": device,
-        "cer_threshold": str(cer_threshold),
-    }
-    if reference_text_path:
-        fields["reference_text_path"] = reference_text_path
-
-    body, content_type = _build_multipart_request(
-        fields=fields,
-        file_field="file",
-        file_path=resolved_image_path,
-    )
-    ocr_url = _build_runtime_url(base_url, "/ocr")
-    req = request.Request(
-        ocr_url,
-        data=body,
-        headers={"Content-Type": content_type},
-        method="POST",
-    )
-    try:
-        with request.urlopen(req, timeout=timeout_sec) as response:
-            payload = _decode_json_response(response)
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Runtime OCR smoke request failed: {exc.code} {detail}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"Runtime OCR smoke request failed: {exc.reason}") from exc
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Runtime OCR smoke request returned invalid JSON.") from exc
-
-    text = str(payload.get("text", "")).strip()
-    if not payload.get("ok"):
-        raise RuntimeError(f"Runtime OCR smoke request failed: {payload}")
-    if not text:
-        raise RuntimeError("Runtime OCR smoke request returned empty text.")
-
-    return {
-        "ok": True,
-        "base_url": base_url.rstrip("/"),
-        "health": health_payload,
-        "ocr": {
-            "engine": payload.get("engine"),
-            "language": payload.get("language", normalized_language),
-            "mode": payload.get("mode", "ocr"),
-            "image_path": str(resolved_image_path),
-            "text_length": len(text),
-            "text_preview": text[:80],
-        },
-    }
-
-
 def runtime_htr_smoke_check(
     *,
     language: str,
     script_variant: str,
     model: Optional[str] = None,
     image_path: Optional[Path] = None,
-    provider: str = "auto",
     device: str = "cpu",
 ) -> Dict[str, Any]:
     normalized_language = normalize_language_code(language)
@@ -225,12 +121,12 @@ def runtime_htr_smoke_check(
     )
     payload: Dict[str, Any] = {
         "ok": True,
-        "mode": "handwritten",
+        "mode": "htr",
+        "writing_mode": "handwritten",
         "language": normalized_language,
         "script_variant": script_variant,
         "runtime_source": _htr_runtime_source(model),
         "model_path": resolved_model,
-        "provider": provider,
         "image_path": str(image_path) if image_path is not None else None,
     }
     if image_path is None:
@@ -243,7 +139,6 @@ def runtime_htr_smoke_check(
         lang=normalized_language,
         image_path=image_path,
         model=model,
-        provider=provider,
         variant=script_variant,
         device=device,
     )
@@ -258,13 +153,12 @@ def runtime_http_htr_smoke_check(
     language: str,
     script_variant: str,
     image_path: Optional[Path],
-    provider: str = "auto",
     device: str = "cpu",
     timeout_sec: int = 120,
     poll_interval_sec: int = 3,
 ) -> Dict[str, Any]:
     if image_path is None:
-        raise ValueError("Handwritten runtime HTTP smoke check requires an image path.")
+        raise ValueError("HTR runtime HTTP smoke check requires an image path.")
     normalized_language = normalize_language_code(language)
     if not image_path.exists():
         raise FileNotFoundError(f"Runtime smoke image not found: {image_path}")
@@ -279,7 +173,6 @@ def runtime_http_htr_smoke_check(
         fields={
             "lang": normalized_language,
             "variant": script_variant,
-            "provider": provider,
             "device": device,
         },
         file_field="file",
@@ -327,7 +220,7 @@ def runtime_http_htr_smoke_check(
 def gradio_http_smoke_check(
     *,
     base_url: str,
-    expected_text: str = "msocr Demo",
+    expected_text: str = "msocr Sogdian HTR",
     timeout_sec: int = 120,
     poll_interval_sec: int = 3,
 ) -> Dict[str, Any]:
@@ -358,80 +251,17 @@ def gradio_http_smoke_check(
         time.sleep(poll_interval_sec)
 
 
-def runtime_smoke_check(
-    *,
-    language: str,
-    script_variant: str,
-    model: Optional[str] = None,
-    image_path: Optional[Path] = None,
-    engine: str = "auto",
-    device: str = "cpu",
-    reference_text_path: Optional[str] = None,
-    cer_threshold: float = 0.05,
-) -> Dict[str, Any]:
-    normalized_language = normalize_language_code(language)
-    resolved_model = resolve_printed_runtime_model_path(
-        language=normalized_language,
-        script_variant=script_variant,
-        model=model,
-    )
-    payload: Dict[str, Any] = {
-        "ok": True,
-        "mode": "printed",
-        "language": normalized_language,
-        "script_variant": script_variant,
-        "runtime_source": _runtime_source(model),
-        "model_path": resolved_model,
-        "image_path": str(image_path) if image_path is not None else None,
-    }
-    if image_path is None:
-        return payload
-
-    if not image_path.exists():
-        raise FileNotFoundError(f"Runtime smoke image not found: {image_path}")
-
-    result = run_printed_service(
-        lang=normalized_language,
-        image_path=image_path,
-        model=model,
-        engine=engine,
-        variant=script_variant,
-        reference_text_path=reference_text_path,
-        cer_threshold=cer_threshold,
-        device=device,
-    )
-    payload["engine"] = result["engine"]
-    payload["text_length"] = len(result["text"])
-    return payload
-
-
 def preflight_runtime_from_env() -> Dict[str, Any]:
-    mode = os.getenv("MSOCR_RUNTIME_SMOKE_MODE", "printed").strip().lower() or "printed"
-    language = os.getenv("MSOCR_RUNTIME_SMOKE_LANG", "syriac").strip() or "syriac"
-    script_variant = os.getenv("MSOCR_RUNTIME_SMOKE_VARIANT", "default").strip() or "default"
+    language = os.getenv("MSOCR_RUNTIME_SMOKE_LANG", "sogdian").strip() or "sogdian"
+    script_variant = os.getenv("MSOCR_RUNTIME_SMOKE_VARIANT", "standard").strip() or "standard"
     image_path_raw = os.getenv("MSOCR_RUNTIME_SMOKE_IMAGE", "").strip()
     image_path = Path(image_path_raw) if image_path_raw else None
-    engine = os.getenv("MSOCR_RUNTIME_SMOKE_ENGINE", "auto").strip() or "auto"
-    provider = os.getenv("MSOCR_RUNTIME_SMOKE_PROVIDER", "auto").strip() or "auto"
     device = os.getenv("MSOCR_RUNTIME_SMOKE_DEVICE", "cpu").strip() or "cpu"
-    reference_text = os.getenv("MSOCR_RUNTIME_SMOKE_REFERENCE_TEXT", "").strip() or None
-    cer_threshold_raw = os.getenv("MSOCR_RUNTIME_SMOKE_CER_THRESHOLD", "0.05").strip() or "0.05"
-    if mode == "handwritten":
-        return runtime_htr_smoke_check(
-            language=language,
-            script_variant=script_variant,
-            image_path=image_path,
-            provider=provider,
-            device=device,
-        )
-    return runtime_smoke_check(
+    return runtime_htr_smoke_check(
         language=language,
         script_variant=script_variant,
         image_path=image_path,
-        engine=engine,
         device=device,
-        reference_text_path=reference_text,
-        cer_threshold=float(cer_threshold_raw),
     )
 
 

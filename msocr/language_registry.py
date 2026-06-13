@@ -1,4 +1,4 @@
-"""Canonical language metadata shared across CLI, services, and docs-facing APIs."""
+"""Canonical language metadata for the manuscript HTR runtime."""
 
 from __future__ import annotations
 
@@ -28,15 +28,13 @@ class LanguageProfile:
 
 
 _PROFILES = (
-    LanguageProfile("syriac", "rtl", "Noto Sans Syriac", "syr"),
-    LanguageProfile("sogdian", "rtl", "Noto Sans Sogdian", "sog"),
-    LanguageProfile("old_sogdian", "rtl", "Noto Sans Old Sogdian", "sog"),
-    LanguageProfile("old_turkish", "rtl", "Noto Sans Old Turkic", "otk"),
-    LanguageProfile("greek", "ltr", "GFS Didot, Noto Serif", "grc"),
-    LanguageProfile("latin", "ltr", "Junicode, EB Garamond", "lat"),
-    LanguageProfile("coptic", "ltr", "Noto Sans Coptic, Antinoou", "cop"),
-    LanguageProfile("armenian", "ltr", "Noto Sans Armenian", "hye", aliases=("armenia",)),
-    LanguageProfile("geez", "ltr", "Noto Sans Ethiopic", "gez"),
+    LanguageProfile(
+        "sogdian",
+        "rtl",
+        "Noto Sans Sogdian",
+        "sog",
+        aliases=("old_sogdian",),
+    ),
 )
 
 LANGUAGE_REGISTRY: Dict[str, dict[str, str | tuple[str, ...]]] = {
@@ -49,27 +47,11 @@ _ALIASES = {
     for alias in (profile.code, *profile.aliases)
 }
 
-CLI_LANGUAGE_CODES = (
-    "greek",
-    "latin",
-    "syriac",
-    "coptic",
-    "armenian",
-    "geez",
-    "sogdian",
-    "old_turkish",
-)
+CLI_LANGUAGE_CODES = ("sogdian",)
 
-CLI_LANGUAGE_ALIASES = ("armenia",)
+CLI_LANGUAGE_ALIASES = ("old_sogdian",)
 
-DEMO_LANGUAGE_CODES = (
-    "greek",
-    "latin",
-    "syriac",
-    "coptic",
-    "armenian",
-    "geez",
-)
+DEMO_LANGUAGE_CODES = CLI_LANGUAGE_CODES
 
 
 def normalize_language_code(value: str) -> str:
