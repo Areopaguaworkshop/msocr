@@ -1,134 +1,79 @@
-"""Tests for runtime model resolution helpers."""
+"""Tests for local Sogdian HTR runtime helpers."""
 
 from pathlib import Path
 
+import pytest
 
-def test_run_printed_service_uses_har_runtime_model(monkeypatch, tmp_path: Path):
-    from msocr.service.runtime import run_printed_service
 
-    image_path = tmp_path / "page.png"
-    image_path.write_bytes(b"png")
-    pulled_model = tmp_path / "runtime" / "syr-estrangela-printed" / "v14" / "model.traineddata"
+def test_resolve_htr_runtime_model_prefers_explicit_model(tmp_path: Path):
+    from msocr.service.runtime import resolve_htr_runtime_model_path
 
-    def fake_pull_file(self, **kwargs):
-        assert kwargs["registry"] == "msocr-models"
-        assert kwargs["package_name"] == "syr-estrangela-printed"
-        assert kwargs["version"] == "v14"
-        assert kwargs["filename"] == "model.traineddata"
-        pulled_model.parent.mkdir(parents=True, exist_ok=True)
-        pulled_model.write_text("model", encoding="utf-8")
-        return pulled_model
+    model_path = tmp_path / "explicit.mlmodel"
+    model_path.write_text("model", encoding="utf-8")
 
-    observed = {}
-
-    def fake_run_printed_ocr(**kwargs):
-        observed["model"] = kwargs["model"]
-        return {"text": "ܫܠܡܐ", "engine": "tesseract", "language": kwargs["lang"]}
-
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_REGISTRY", "msocr-models")
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_VERSION", "v14")
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_FILENAME", "model.traineddata")
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_CACHE_DIR", str(tmp_path / "runtime"))
-    monkeypatch.setattr("msocr.service.runtime.HARClient.pull_file", fake_pull_file)
-    monkeypatch.setattr("msocr.service.runtime.run_printed_ocr", fake_run_printed_ocr)
-
-    result = run_printed_service(
-        lang="syriac",
-        image_path=image_path,
-        engine="tesseract",
-        variant="estrangela",
+    assert (
+        resolve_htr_runtime_model_path(
+            language="sogdian",
+            script_variant="standard",
+            model=str(model_path),
+        )
+        == str(model_path)
     )
 
-    assert observed["model"] == str(pulled_model)
-    assert result["text"] == "ܫܠܡܐ"
+
+def test_prefetch_htr_runtime_model_from_env_validates_local_path(monkeypatch, tmp_path: Path):
+    from msocr.service.runtime import prefetch_htr_runtime_model_from_env
+
+    model_path = tmp_path / "sogdian.mlmodel"
+    model_path.write_text("model", encoding="utf-8")
+    monkeypatch.setenv("MSOCR_HTR_RUNTIME_MODEL_PATH", str(model_path))
+
+    assert prefetch_htr_runtime_model_from_env() == model_path
 
 
-def test_prefetch_runtime_model_from_env_uses_explicit_package(monkeypatch, tmp_path: Path):
-    from msocr.service.runtime import prefetch_printed_runtime_model_from_env
+def test_prefetch_htr_runtime_model_from_env_rejects_missing_path(monkeypatch, tmp_path: Path):
+    from msocr.service.runtime import prefetch_htr_runtime_model_from_env
 
-    pulled_model = tmp_path / "runtime" / "deploy" / "v14" / "model.traineddata"
+    monkeypatch.setenv("MSOCR_HTR_RUNTIME_MODEL_PATH", str(tmp_path / "missing.mlmodel"))
 
-    def fake_pull_file(self, **kwargs):
-        assert kwargs["package_name"] == "deploy/syriac-runtime"
-        pulled_model.parent.mkdir(parents=True, exist_ok=True)
-        pulled_model.write_text("model", encoding="utf-8")
-        return pulled_model
-
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_REGISTRY", "msocr-models")
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_VERSION", "v14")
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_FILENAME", "model.traineddata")
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_PACKAGE", "deploy/syriac-runtime")
-    monkeypatch.setenv("MSOCR_RUNTIME_HAR_CACHE_DIR", str(tmp_path / "runtime"))
-    monkeypatch.setattr("msocr.service.runtime.HARClient.pull_file", fake_pull_file)
-
-    resolved = prefetch_printed_runtime_model_from_env()
-
-    assert resolved == pulled_model
+    with pytest.raises(FileNotFoundError, match="Configured HTR model path not found"):
+        prefetch_htr_runtime_model_from_env()
 
 
-def test_run_htr_service_uses_har_runtime_model_for_syriac_auto(monkeypatch, tmp_path: Path):
+def test_run_htr_service_uses_kraken_model(monkeypatch, tmp_path: Path):
     from msocr.service.runtime import run_htr_service
 
-    image_path = tmp_path / "page.png"
+    image_path = tmp_path / "line.png"
     image_path.write_bytes(b"png")
-    pulled_model = tmp_path / "runtime" / "syr-default-handwritten" / "v14" / "model.mlmodel"
-
-    def fake_pull_file(self, **kwargs):
-        assert kwargs["registry"] == "msocr-models"
-        assert kwargs["package_name"] == "syr-default-handwritten"
-        assert kwargs["version"] == "v14"
-        assert kwargs["filename"] == "model.mlmodel"
-        pulled_model.parent.mkdir(parents=True, exist_ok=True)
-        pulled_model.write_text("model", encoding="utf-8")
-        return pulled_model
+    model_path = tmp_path / "sogdian.mlmodel"
+    model_path.write_text("model", encoding="utf-8")
 
     observed = {}
 
     def fake_predict(image_path_arg, model_path_arg, device="cpu", segmentation_type="baseline"):
+        observed["image"] = image_path_arg
         observed["model"] = model_path_arg
         observed["device"] = device
         observed["segmentation_type"] = segmentation_type
-        return "ܫܠܡܐ"
+        return "𐼷𐼹𐼻"
 
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_REGISTRY", "msocr-models")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_VERSION", "v14")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_FILENAME", "model.mlmodel")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_CACHE_DIR", str(tmp_path / "runtime"))
-    monkeypatch.setattr("msocr.service.runtime.HARClient.pull_file", fake_pull_file)
     monkeypatch.setattr("msocr.service.runtime.predict", fake_predict)
 
     result = run_htr_service(
-        lang="syriac",
+        lang="old_sogdian",
         image_path=image_path,
-        provider="auto",
-        variant="default",
+        model=str(model_path),
+        variant="standard",
+        device="cpu",
     )
 
-    assert observed["model"] == str(pulled_model)
-    assert observed["device"] == "cpu"
+    assert observed == {
+        "image": str(image_path),
+        "model": str(model_path),
+        "device": "cpu",
+        "segmentation_type": "baseline",
+    }
+    assert result["text"] == "𐼷𐼹𐼻"
     assert result["engine"] == "kraken"
-    assert result["text"] == "ܫܠܡܐ"
-
-
-def test_prefetch_htr_runtime_model_from_env_uses_variant_naming(monkeypatch, tmp_path: Path):
-    from msocr.service.runtime import prefetch_htr_runtime_model_from_env
-
-    pulled_model = tmp_path / "runtime" / "syr-serto-handwritten" / "v21" / "model.mlmodel"
-
-    def fake_pull_file(self, **kwargs):
-        assert kwargs["package_name"] == "syr-serto-handwritten"
-        pulled_model.parent.mkdir(parents=True, exist_ok=True)
-        pulled_model.write_text("model", encoding="utf-8")
-        return pulled_model
-
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_REGISTRY", "msocr-models")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_VERSION", "v21")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_FILENAME", "model.mlmodel")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_LANG", "syriac")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_VARIANT", "serto")
-    monkeypatch.setenv("MSOCR_HTR_RUNTIME_HAR_CACHE_DIR", str(tmp_path / "runtime"))
-    monkeypatch.setattr("msocr.service.runtime.HARClient.pull_file", fake_pull_file)
-
-    resolved = prefetch_htr_runtime_model_from_env()
-
-    assert resolved == pulled_model
+    assert result["language"] == "sogdian"
+    assert result["writing_mode"] == "handwritten"

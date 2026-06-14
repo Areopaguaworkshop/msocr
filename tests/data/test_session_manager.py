@@ -1,489 +1,112 @@
-"""Tests for session manager module."""
+"""Tests for Sogdian annotation session persistence."""
+
+from pathlib import Path
 
 import pytest
-import tempfile
-import shutil
-from pathlib import Path
-from datetime import datetime
-import json
 
 from msocr.data.session_manager import (
     AnnotationSession,
-    LineSegment,
-    SessionManager,
-    IngestionPath,
     ExportFormat,
+    IngestionPath,
+    LineSegment,
     SegmentationEngine,
+    SessionManager,
 )
 
 
-class TestLineSegment:
-    """Tests for LineSegment dataclass."""
-
-    def test_line_segment_creation(self):
-        """Test creating a LineSegment with all fields."""
-        line = LineSegment(
-            line_id="line_001",
-            order=1,
-            baseline_points=[(10, 100), (50, 102), (90, 98)],
-            boundary_points=[(10, 80), (10, 120), (90, 120), (90, 80)],
-            image_crop_path="crops/line_001.jpg",
-        )
-
-        assert line.line_id == "line_001"
-        assert line.order == 1
-        assert len(line.baseline_points) == 3
-        assert len(line.boundary_points) == 4
-        assert line.image_crop_path == "crops/line_001.jpg"
-
-    def test_line_segment_default_values(self):
-        """Test LineSegment with default values."""
-        line = LineSegment(
-            line_id="line_002",
-            order=2,
-        )
-
-        assert line.line_id == "line_002"
-        assert line.order == 2
-        assert line.baseline_points is None
-        assert line.boundary_points is None
-        assert line.image_crop_path is None
-        assert line.transcript is None
+@pytest.fixture
+def session_manager(tmp_path: Path) -> SessionManager:
+    return SessionManager(sessions_dir=tmp_path / "sessions")
 
 
-class TestAnnotationSession:
-    """Tests for AnnotationSession dataclass."""
+def test_annotation_session_uses_sogdian_metadata():
+    session = AnnotationSession(
+        session_id="test-session",
+        language="sogdian",
+        script_variant="standard",
+        segmentation_engine=SegmentationEngine.BLLA,
+        lines=[LineSegment(line_id="line_001", order=1)],
+        ingestion_path=IngestionPath.BROWSER_UPLOAD,
+        source="page.png",
+    )
 
-    def test_session_creation(self):
-        """Test creating an AnnotationSession."""
-        lines = [
-            LineSegment(line_id="line_001", order=1),
-            LineSegment(line_id="line_002", order=2),
-        ]
-        
-        session = AnnotationSession(
-            session_id="test-session-123",
-            language="syriac",
-            script_variant="estrangela",
-            segmentation_engine=SegmentationEngine.BLLA,
-            lines=lines,
-            ingestion_path=IngestionPath.BROWSER_UPLOAD,
-            source="test.jpg",
-        )
-
-        assert session.session_id == "test-session-123"
-        assert session.language == "syriac"
-        assert session.script_variant == "estrangela"
-        assert session.segmentation_engine == SegmentationEngine.BLLA
-        assert len(session.lines) == 2
-        assert session.needs_manual_review is False
-        assert session.ingestion_path == IngestionPath.BROWSER_UPLOAD
-
-    def test_session_rtl_languages(self):
-        """Test session for RTL languages."""
-        session = AnnotationSession(
-            session_id="rtl-session",
-            language="syriac",
-            script_variant="estrangela",
-            segmentation_engine=SegmentationEngine.BLLA,
-            lines=[],
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="/path/to/image.tif",
-        )
-
-        assert session.is_rtl is True
-
-    def test_session_ltr_languages(self):
-        """Test session for LTR languages."""
-        session = AnnotationSession(
-            session_id="ltr-session",
-            language="greek",
-            script_variant="polytonic",
-            segmentation_engine=SegmentationEngine.BLLA,
-            lines=[],
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="/path/to/image.tif",
-        )
-
-        assert session.is_rtl is False
+    assert session.is_rtl is True
+    assert session.get_language_iso() == "sog"
+    assert session.get_web_font_spec() == "Noto Sans Sogdian"
 
 
-class TestSessionManager:
-    """Tests for SessionManager class."""
+def test_create_session_normalizes_old_sogdian_alias(session_manager: SessionManager):
+    session = session_manager.create_session(
+        language="old_sogdian",
+        script_variant="standard",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.tif",
+        lines=[LineSegment(line_id="line_001", order=1)],
+    )
 
-    @pytest.fixture
-    def temp_sessions_dir(self):
-        """Create a temporary directory for sessions."""
-        temp_dir = tempfile.mkdtemp()
-        yield Path(temp_dir)
-        shutil.rmtree(temp_dir)
+    loaded = session_manager.get_session(session.session_id)
+    assert loaded is not None
+    assert loaded.language == "sogdian"
+    assert loaded.script_variant == "standard"
+    assert loaded.lines[0].line_id == "line_001"
 
-    @pytest.fixture
-    def session_manager(self, temp_sessions_dir):
-        """Create a SessionManager instance."""
-        return SessionManager(sessions_dir=temp_sessions_dir)
 
-    def test_create_session(self, session_manager, temp_sessions_dir):
-        """Test creating a new session."""
-        lines = [
-            LineSegment(line_id="line_001", order=1),
-            LineSegment(line_id="line_002", order=2),
-        ]
-
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.BROWSER_UPLOAD,
-            source="test_upload.jpg",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        assert session.session_id is not None
-        assert session.language == "syriac"
-        assert session.script_variant == "estrangela"
-        assert len(session.lines) == 2
-        assert session.ingestion_path == IngestionPath.BROWSER_UPLOAD
-
-        # Verify session directory was created
-        session_dir = temp_sessions_dir / session.session_id
-        assert session_dir.exists()
-        assert (session_dir / "session.json").exists()
-
-    def test_get_session(self, session_manager, temp_sessions_dir):
-        """Test loading an existing session."""
-        lines = [LineSegment(line_id="line_001", order=1)]
-
-        created_session = session_manager.create_session(
-            language="greek",
-            script_variant="polytonic",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="greek_page.tif",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        loaded_session = session_manager.get_session(created_session.session_id)
-
-        assert loaded_session is not None
-        assert loaded_session.session_id == created_session.session_id
-        assert loaded_session.language == "greek"
-        assert loaded_session.script_variant == "polytonic"
-
-    def test_get_nonexistent_session(self, session_manager):
-        """Test loading a session that doesn't exist."""
-        result = session_manager.get_session("nonexistent-id")
-        assert result is None
-
-    def test_save_annotations(self, session_manager):
-        """Test saving annotations to a session."""
-        lines = [
-            LineSegment(line_id="line_001", order=1),
-            LineSegment(line_id="line_002", order=2),
-        ]
-
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="serto",
-            ingestion_path=IngestionPath.IIIF_MANIFEST,
-            source="https://example.com/iiif/manifest.json",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        # Save annotations
-        annotations = {
-            "line_001": {"transcript": "�车身", "skip": False},
-            "line_002": {"transcript": "ⲡⲉⲧⲣⲟⲥ", "skip": False},
-        }
-
-        updated_session = session_manager.save_annotations(
-            session.session_id, annotations
-        )
-
-        assert updated_session is not None
-        assert "line_001" in updated_session.annotations
-        assert updated_session.annotations["line_001"]["transcript"] == "�车身"
-        assert "line_002" in updated_session.annotations
-        assert updated_session.annotations["line_002"]["transcript"] == "ⲡⲉⲧⲣⲟⲥ"
-
-    def test_export_alto(self, session_manager):
-        """Test exporting session to ALTO XML format."""
-        lines = [
+def test_save_annotations_and_export_formats(session_manager: SessionManager):
+    session = session_manager.create_session(
+        language="sogdian",
+        script_variant="standard",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.tif",
+        lines=[
             LineSegment(
                 line_id="line_001",
                 order=1,
-                baseline_points=[(10, 100), (50, 102)],
-                boundary_points=[(10, 80), (10, 120), (90, 120), (90, 80)],
+                baseline_points=[(10, 100), (90, 100)],
+                boundary_points=[(10, 80), (90, 80), (90, 120), (10, 120)],
                 image_crop_path="crops/line_001.jpg",
-            ),
-            LineSegment(
-                line_id="line_002",
-                order=2,
-                baseline_points=[(10, 200), (50, 202)],
-                boundary_points=[(10, 180), (10, 220), (90, 220), (90, 180)],
-                image_crop_path="crops/line_002.jpg",
-            ),
-        ]
+            )
+        ],
+    )
+    session_manager.save_annotations(
+        session.session_id,
+        {"line_001": {"transcript": "𐼷𐼹𐼻", "skip": False}},
+    )
 
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="page.tif",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
+    alto_output = session_manager.export_session(session.session_id, ExportFormat.ALTO)
+    page_output = session_manager.export_session(session.session_id, ExportFormat.PAGE)
+    tsv_output = session_manager.export_session(session.session_id, ExportFormat.TSV)
 
-        # Add annotations
-        annotations = {
-            "line_001": {"transcript": "�车身", "skip": False},
-            "line_002": {"transcript": "ⲥⲁⲣⲁ", "skip": False},
-        }
-        session_manager.save_annotations(session.session_id, annotations)
+    assert 'LANG="sogdian"' in alto_output
+    assert 'CONTENT="𐼷𐼹𐼻"' in alto_output
+    assert "language:{ value:sogdian; }" in page_output
+    assert "script:{ value:standard; }" in page_output
+    assert "crops/line_001.jpg\t𐼷𐼹𐼻" in tsv_output
 
-        # Export to ALTO
-        alto_output = session_manager.export_session(
-            session.session_id, ExportFormat.ALTO
-        )
 
-        assert alto_output is not None
-        assert "<?xml" in alto_output
-        assert '<TextBlock' in alto_output
-        assert 'LANG="syriac"' in alto_output
-        assert '<TextLine' in alto_output
+def test_manual_segmentation_sets_review_flag(session_manager: SessionManager):
+    session = session_manager.create_session(
+        language="sogdian",
+        script_variant="standard",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.tif",
+        segmentation_engine=SegmentationEngine.MANUAL,
+    )
 
-    def test_export_page_xml(self, session_manager):
-        """Test exporting session to PAGE XML format."""
-        lines = [
-            LineSegment(
-                line_id="line_001",
-                order=1,
-                baseline_points=[(10, 100), (50, 102)],
-                boundary_points=[(10, 80), (10, 120), (90, 120), (90, 80)],
-                image_crop_path="crops/line_001.jpg",
-            ),
-        ]
+    assert session.needs_manual_review is True
 
-        session = session_manager.create_session(
-            language="greek",
-            script_variant="polytonic",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="greek.tif",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
 
-        annotations = {
-            "line_001": {"transcript": "θεός", "skip": False},
-        }
-        session_manager.save_annotations(session.session_id, annotations)
+def test_save_page_image_from_local_file(session_manager: SessionManager, tmp_path: Path):
+    source = tmp_path / "source.tif"
+    source.write_bytes(b"image_data")
+    session = session_manager.create_session(
+        language="sogdian",
+        script_variant="standard",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source=str(source),
+    )
 
-        page_output = session_manager.export_session(
-            session.session_id, ExportFormat.PAGE
-        )
+    saved = session_manager.save_page_image(session.session_id, image_source=source)
 
-        assert page_output is not None
-        assert "<?xml" in page_output
-        assert '<Page' in page_output
-        # PAGE XML uses custom attribute for language/script
-        assert 'language:{ value:greek; }' in page_output
-        assert 'script:{ value:polytonic; }' in page_output
-
-    def test_export_tsv(self, session_manager):
-        """Test exporting session to TSV format for ketos train."""
-        lines = [
-            LineSegment(
-                line_id="line_001",
-                order=1,
-                image_crop_path="crops/line_001.jpg",
-            ),
-            LineSegment(
-                line_id="line_002",
-                order=2,
-                image_crop_path="crops/line_002.jpg",
-            ),
-        ]
-
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.BROWSER_UPLOAD,
-            source="upload.tif",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        annotations = {
-            "line_001": {"transcript": "�车身", "skip": False},
-            "line_002": {"transcript": "ⲁⲃ", "skip": False},
-        }
-        session_manager.save_annotations(session.session_id, annotations)
-
-        tsv_output = session_manager.export_session(
-            session.session_id, ExportFormat.TSV
-        )
-
-        assert tsv_output is not None
-        assert "crops/line_001.jpg\t�车身" in tsv_output
-        assert "crops/line_002.jpg\tⲁⲃ" in tsv_output
-
-    def test_segmentation_fallback_blla(self, session_manager):
-        """Test that BLLA is used as primary segmentation."""
-        lines = [LineSegment(line_id="line_001", order=1)]
-
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="test.tif",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        assert session.segmentation_engine == SegmentationEngine.BLLA
-
-    def test_segmentation_fallback_pageseg(self, session_manager):
-        """Test fallback to pageseg when blla fails."""
-        lines = [LineSegment(line_id="line_001", order=1)]
-
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="test.tif",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.PAGESEG,
-        )
-
-        assert session.segmentation_engine == SegmentationEngine.PAGESEG
-
-    def test_session_with_iiif_manifest(self, session_manager):
-        """Test session creation from IIIF manifest."""
-        lines = [LineSegment(line_id="line_001", order=1)]
-
-        session = session_manager.create_session(
-            language="sogdian",
-            script_variant="formal",
-            ingestion_path=IngestionPath.IIIF_MANIFEST,
-            source="https://example.com/iiif/manifest.json",
-            lines=lines,
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        assert session.ingestion_path == IngestionPath.IIIF_MANIFEST
-        assert session.language == "sogdian"
-
-    def test_rtl_web_font_spec(self, session_manager):
-        """Test that RTL languages get correct web font spec."""
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="test.tif",
-            lines=[],
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        font_spec = session.get_web_font_spec()
-        assert "Noto Sans Syriac" in font_spec
-
-    def test_ltr_web_font_spec(self, session_manager):
-        """Test that LTR languages get correct web font spec."""
-        session = session_manager.create_session(
-            language="greek",
-            script_variant="polytonic",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="test.tif",
-            lines=[],
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        font_spec = session.get_web_font_spec()
-        assert "GFS Didot" in font_spec or "Noto Serif" in font_spec
-
-    def test_needs_manual_review_flag(self, session_manager):
-        """Test that needs_manual_review flag is set correctly."""
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="test.tif",
-            lines=[],
-            segmentation_engine=SegmentationEngine.PAGESEG,
-        )
-
-        # When using pageseg fallback, should set manual review flag
-        assert session.needs_manual_review is True
-
-    def test_save_page_image_from_local_file(self, session_manager, temp_sessions_dir):
-        """Test saving page image from local file to session directory."""
-        # Create a test image file
-        test_image = temp_sessions_dir / "source_image.tif"
-        test_image.write_bytes(b"fake_tiff_content_for_testing")
-
-        session = session_manager.create_session(
-            language="syriac",
-            script_variant="estrangela",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source=str(test_image),
-            lines=[],
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        # Save page image from local file
-        result = session_manager.save_page_image(
-            session.session_id,
-            image_source=test_image,
-        )
-
-        assert result is not None
-        assert result.exists()
-        assert result.name == "page.tif"
-        assert result.read_bytes() == b"fake_tiff_content_for_testing"
-
-    def test_save_page_image_from_browser_upload(self, session_manager, temp_sessions_dir):
-        """Test saving page image from browser upload bytes."""
-        session = session_manager.create_session(
-            language="greek",
-            script_variant="polytonic",
-            ingestion_path=IngestionPath.BROWSER_UPLOAD,
-            source="browser_upload.jpg",
-            lines=[],
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        # Save page image from browser upload bytes
-        test_bytes = b"fake_jpeg_content_from_browser"
-        result = session_manager.save_page_image(
-            session.session_id,
-            image_bytes=test_bytes,
-        )
-
-        assert result is not None
-        assert result.exists()
-        assert result.name == "page.tif"
-        assert result.read_bytes() == test_bytes
-
-    def test_page_image_persistence_directory_structure(self, session_manager, temp_sessions_dir):
-        """Test that page.tif is created in correct session directory."""
-        session = session_manager.create_session(
-            language="sogdian",
-            script_variant="formal",
-            ingestion_path=IngestionPath.LOCAL_FILE,
-            source="source.tif",
-            lines=[],
-            segmentation_engine=SegmentationEngine.BLLA,
-        )
-
-        # Create and save page image
-        test_image = temp_sessions_dir / "test_source.tif"
-        test_image.write_bytes(b"image_data")
-        page_path = session_manager.save_page_image(session.session_id, image_source=test_image)
-
-        # Verify directory structure
-        session_dir = temp_sessions_dir / session.session_id
-        assert session_dir.exists()
-        assert (session_dir / "session.json").exists()
-        assert (session_dir / "page.tif").exists()
-        assert (session_dir / "crops").exists()
+    assert saved is not None
+    assert saved.name == "page.tif"
+    assert saved.read_bytes() == b"image_data"
