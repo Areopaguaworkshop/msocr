@@ -27,13 +27,13 @@ def test_load_frozen_manifest_resolves_manifest_id_and_paths(tmp_path: Path):
     _, _, _ = _write_case_files(corpus_dir, "ms001", "line_0001")
     _, holdout_image, holdout_reference = _write_case_files(corpus_dir, "ms002", "line_0002")
 
-    manifest_path = manifests_dir / "printed-v1.json"
+    manifest_path = manifests_dir / "sogdian-htr-v1.json"
     manifest_path.write_text(
         json.dumps(
             {
-                "manifest_id": "printed-v1",
-                "language": "syriac",
-                "writing_mode": "printed",
+                "manifest_id": "sogdian-htr-v1",
+                "language": "sogdian",
+                "writing_mode": "handwritten",
                 "base_dir": str(corpus_dir),
                 "partitions": {
                     "train": [
@@ -48,7 +48,7 @@ def test_load_frozen_manifest_resolves_manifest_id_and_paths(tmp_path: Path):
                             "id": "line_0002",
                             "image": "ms002/line_0002.png",
                             "reference_text": "ms002/line_0002.txt",
-                            "script_variant": "estrangela",
+                            "script_variant": "standard",
                             "manuscript_id": "ms002",
                         }
                     ],
@@ -60,14 +60,14 @@ def test_load_frozen_manifest_resolves_manifest_id_and_paths(tmp_path: Path):
         encoding="utf-8",
     )
 
-    manifest = load_frozen_manifest("printed-v1", manifests_dir=manifests_dir)
+    manifest = load_frozen_manifest("sogdian-htr-v1", manifests_dir=manifests_dir)
 
-    assert manifest.manifest_id == "printed-v1"
-    assert manifest.writing_mode == "printed"
+    assert manifest.manifest_id == "sogdian-htr-v1"
+    assert manifest.writing_mode == "handwritten"
     holdout_case = manifest.get_partition("test")[0]
     assert holdout_case.image == holdout_image
     assert holdout_case.reference_text == holdout_reference
-    assert holdout_case.variant == "estrangela"
+    assert holdout_case.variant == "standard"
 
 
 def test_load_frozen_manifest_rejects_cross_partition_manuscript_overlap(tmp_path: Path):

@@ -199,17 +199,10 @@ def get_supported_languages() -> Dict[str, Dict[str, Any]]:
     return {
         "sogdian": {
             "name": "Sogdian",
-            "direction": "LTR",
+            "direction": "RTL",
             "script": "Sogdian",
             "config_file": "configs/sogdian_config.yaml",
             "common_characters": "ʾβγδζθκλμνξοπρστυφχψω𐼰𐼱𐼲𐼳𐼴𐼵𐼶𐼷𐼸𐼹𐼺𐼻𐼼𐼽𐼾𐼿"
-        },
-        "old_turkish": {
-            "name": "Old Turkish",
-            "direction": "RTL", 
-            "script": "Old Turkic",
-            "config_file": "configs/old_turkish_config.yaml",
-            "common_characters": "𐰀𐰁𐰂𐰃𐰄𐰅𐰆𐰇𐰈𐰉𐰊𐰋𐰌𐰍𐰎𐰏𐰐𐰑𐰒𐰓𐰔𐰕𐰖𐰗𐰘𐰙𐰚𐰛𐰜𐰝𐰞𐰟𐰠𐰡𐰢𐰣𐰤𐰥𐰦𐰧𐰨𐰩𐰪𐰫𐰬𐰭𐰮𐰯𐰰𐰱𐰲𐰳𐰴𐰵𐰶𐰷𐰸𐰹𐰺𐰻𐰼𐰽𐰾𐰿𐱀𐱁𐱂𐱃𐱄𐱅𐱆𐱇𐱈𐱉𐱊𐱋𐱌𐱍𐱎𐱏𐱐𐱑𐱒𐱓𐱔𐱕𐱖𐱗𐱘𐱙𐱚𐱛𐱜𐱝𐱞𐱟𐱠𐱡𐱢𐱣𐱤𐱥𐱦𐱧𐱨𐱩𐱪𐱫𐱬𐱭𐱮𐱯𐱰𐱱𐱲𐱳𐱴𐱵𐱶𐱷𐱸𐱹𐱺𐱻"
         }
     }
 

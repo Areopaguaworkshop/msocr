@@ -1,4 +1,4 @@
-"""Input loaders for image/PDF OCR entrypoints."""
+"""Input loaders for image/PDF HTR entrypoints."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def expand_input_to_images(
     - Image input returns a single-item list with the original image path.
     - PDF input renders all pages to PNGs in `temp_dir` and returns page image paths.
     
-    Note: Images with alpha channels are handled by _run_ocrmypdf in formats.py
+    PDF input is rendered to temporary page images before Kraken inference.
     """
     if not input_path.exists():
         raise FileNotFoundError(f"Input not found: {input_path}")

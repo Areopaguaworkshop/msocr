@@ -195,8 +195,8 @@ class SessionManager:
         """Create a new annotation session.
         
         Args:
-            language: Language code (e.g., 'syriac', 'greek')
-            script_variant: Script variant (e.g., 'estrangela', 'polytonic')
+            language: Language code (sogdian or old_sogdian)
+            script_variant: Sogdian manuscript variant label
             ingestion_path: Source of the image (browser upload, local file, or IIIF)
             source: Source path or URL
             lines: Pre-segmented lines (optional)

@@ -1,4 +1,4 @@
-"""CLI interface for the Sogdian manuscript HTR pipeline."""
+"""CLI interface for Sogdian manuscript HTR."""
 
 from __future__ import annotations
 
@@ -139,7 +139,7 @@ def main() -> None:
     type=OUTPUT_FORMAT_CHOICES,
     default="json",
     show_default=True,
-    help="Output format: json or markdown. Comma-separated values are accepted.",
+    help="Output format: json or markdown.",
 )
 @click.option("--output", "-o", help="Output path (file or directory)")
 @click.option("--device", default="cpu", show_default=True, help="Inference device")

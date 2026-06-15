@@ -1,4 +1,4 @@
-"""Dataset splitter for corrected lines."""
+"""Dataset splitter for Sogdian manuscript line XML."""
 
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ def split_dataset(corrected_dir: Path, train_dir: Path, val_dir: Path, hold_dir:
         "schema_version": "msocr.manifest.v1",
         "kind": "split",
         "generated_at": datetime.now().isoformat(),
-        "writing_mode": str(cfg.get("writing_mode", "printed")).lower(),
+        "writing_mode": str(cfg.get("writing_mode", "handwritten")).lower(),
         "language": cfg.get("language"),
         "dvc_tracked": bool(cfg.get("dvc_tracked", False)),
         "seed": seed,

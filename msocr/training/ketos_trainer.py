@@ -221,7 +221,7 @@ class KetosTrainer:
         return cmd
     
     def train(self, xml_files: Optional[List[Path]] = None) -> bool:
-        """Complete training workflow."""
+        """Compile XML ground truth and train a Kraken recognizer."""
         # Validate configuration
         errors = self.validate_config()
         if errors:

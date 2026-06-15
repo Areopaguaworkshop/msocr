@@ -1,13 +1,12 @@
 [project]
 name = "msocr"
-version = "0.20.0"
-description = "Manuscript OCR for Sogdian and Old Turkish using Kraken"
+version = "0.21.0"
+description = "Sogdian manuscript HTR using Kraken"
 authors = [{name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com"}]
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 dependencies = [
     "kraken>=5.0.0",
-    "ocrmypdf>=14.0.0",
     "opencv-python>=4.8.0",
     "pillow>=10.0.0",
     "numpy>=1.24.0",
@@ -22,8 +21,6 @@ dependencies = [
     "uvicorn>=0.30.0",
     "gradio>=4.44.0",
     "pypdfium2>=4.30.0",
-    "pypdf>=4.0.0",
-    "reportlab>=4.0.0",
 ]
 
 [project.optional-dependencies]

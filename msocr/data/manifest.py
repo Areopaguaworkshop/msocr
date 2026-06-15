@@ -1,4 +1,4 @@
-"""Frozen manifest manager for reproducible training and benchmark runs."""
+"""Frozen manifest manager for reproducible Sogdian HTR training runs."""
 
 from __future__ import annotations
 
@@ -356,7 +356,7 @@ def load_frozen_manifest(
     _validate_manuscript_overlap(partitions)
 
     manifest_id = str(payload.get("manifest_id") or payload.get("id") or manifest_path.stem)
-    writing_mode = str(payload.get("writing_mode", "printed")).strip().lower()
+    writing_mode = str(payload.get("writing_mode", "handwritten")).strip().lower()
     language = payload.get("language")
     if language is not None:
         language = str(language).strip().lower()

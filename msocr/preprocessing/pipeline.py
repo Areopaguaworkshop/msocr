@@ -1,4 +1,4 @@
-"""Image preprocessing pipeline for manuscript enhancement."""
+"""Image preprocessing helpers for manuscript enhancement."""
 
 import cv2
 import numpy as np

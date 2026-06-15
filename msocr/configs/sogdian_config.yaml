@@ -1,4 +1,4 @@
-# Sogdian Manuscript OCR Training Configuration
+# Sogdian Manuscript HTR Training Configuration
 
 # Dataset configuration
 dataset:
@@ -14,8 +14,8 @@ model:
   # Normalization for Sogdian script
   normalization: "NFC"  # Unicode normalization form
   
-  # Script direction
-  base_dir: "L"  # Left-to-right for Sogdian
+  # Script direction. Old Sogdian manuscript hands are treated as RTL in this project.
+  base_dir: "R"
 
 # Training configuration
 training:

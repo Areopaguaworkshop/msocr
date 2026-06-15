@@ -27,8 +27,8 @@ from msocr.language_registry import is_supported_language, normalize_language_co
 class CreateSessionRequest(BaseModel):
     """Request model for creating a new annotation session."""
 
-    language: str = Field(..., description="Language code (e.g., 'syriac', 'greek')")
-    script_variant: str = Field(..., description="Script variant (e.g., 'estrangela', 'polytonic')")
+    language: str = Field(..., description="Language code: sogdian or old_sogdian")
+    script_variant: str = Field(..., description="Sogdian manuscript variant label")
     ingestion_path: str = Field(
         default="browser_upload",
         description="Source of the image: browser_upload, local_file, or iiif_manifest",
