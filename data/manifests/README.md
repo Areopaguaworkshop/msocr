@@ -1,20 +1,21 @@
-# Frozen Manifest Registry
+# Sogdian Manifest Registry
 
-Store reproducible training and benchmark manifests in this directory.
+Store reproducible Sogdian manuscript HTR training manifests in this directory.
 
-- Manifests are keyed by `manifest_id` and should normally live at `data/manifests/<manifest_id>.json`.
-- Track the underlying corpus with DVC and keep the manifest itself in git so a model or benchmark report can always be traced back to an immutable split.
+- Manifests are keyed by `manifest_id` and normally live at `data/manifests/<manifest_id>.json`.
+- Keep split manifests in git; keep large images/XML data outside git or under external dataset storage.
 - Split manifests must isolate `manuscript_id` across `train`, `validation`, and `holdout` partitions.
+- This project only accepts `language: "sogdian"` and `writing_mode: "handwritten"`.
 
 Minimal schema:
 
 ```json
 {
-  "manifest_id": "syriac-printed-v1",
-  "writing_mode": "printed",
-  "language": "syriac",
+  "manifest_id": "sogdian-manuscript-v1",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
   "dvc_tracked": true,
-  "base_dir": "dataset/ground_truth/syriac",
+  "base_dir": "dataset/ground_truth/sogdian",
   "partitions": {
     "train": [
       {
@@ -24,16 +25,7 @@ Minimal schema:
       }
     ],
     "validation": [],
-    "holdout": [
-      {
-        "id": "ms002_case_0001",
-        "image": "ms002/page_0001.png",
-        "reference_text": "ms002/page_0001.txt",
-        "language": "syriac",
-        "script_variant": "estrangela",
-        "manuscript_id": "ms002"
-      }
-    ]
+    "holdout": []
   }
 }
 ```

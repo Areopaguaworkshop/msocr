@@ -14,7 +14,7 @@ uv sync
 uv run pytest
 
 # Run a single test directory
-uv run pytest tests/evaluation/
+uv run pytest tests/service/
 ```
 
 Requires Python 3.12 (see `.python-version`).
@@ -34,64 +34,42 @@ Single Python package (`msocr/`) with a Click CLI, FastAPI service, and Gradio d
 ```
 msocr/
 ├── cli.py                # All CLI subcommands (click group)
-├── language_registry.py   # Canonical language profiles & normalize
-├── pipelines/
-│   ├── printed_ocr.py    # Printed OCR routing (Kraken↔Tesseract)
-│   └── payne_smith.py    # Payne-Smith Syriac training pipeline
+├── language_registry.py   # Canonical Sogdian profile & normalize
 ├── models/
-│   └── inference.py       # Kraken/Tesseract inference wrapper
+│   └── inference.py       # Kraken HTR inference wrapper
 ├── service/
-│   ├── api.py             # FastAPI endpoints (/health, /ocr, /htr)
+│   ├── api.py             # FastAPI endpoints (/health, /htr)
 │   ├── gradio_demo.py     # Gradio browser UI
 │   ├── runtime.py         # HTR service dispatcher
 │   ├── deploy.py          # Server startup + runtime smoke checks
 │   └── annotation_api.py  # Annotation session API (port 8001)
 ├── evaluation/
-│   ├── metrics.py         # CER/WER computation
-│   └── printed_benchmark.py
-├── pipeline/
-│   ├── runpod_client.py    # RunPod API client
-│   ├── har_client.py       # Harness Artifact Registry client
-│   └── workflow.py         # End-to-end training→benchmark→promotion
+│   └── metrics.py         # CER/WER computation helpers
 ├── training/
 │   └── ketos_trainer.py
 ├── data/
 │   └── manifest.py         # Frozen split manifest loading
 └── output/
-    └── formats.py          # JSON/Markdown/PDF output writers
+    └── formats.py          # JSON/Markdown output writers
 ```
 
 ## Key Conventions
 
-### Route Separation (Mandatory)
+### HTR-Only Scope
 
-All code and tests **must** keep `printed` (OCR) and `handwritten` (HTR) routes strictly separated. The `writing_mode` field (`printed`|`handwritten`) drives routing everywhere — CLI, API, runtime resolution, and benchmarks.
+The active project is Sogdian manuscript HTR only. Do not reintroduce printed OCR routing, Tesseract fallbacks, RunPod submission, HAR promotion, or pipeline/workflow orchestration.
 
 ### Language Codes
 
-CLI accepts long names (`greek`, `latin`, `syriac`, `coptic`, `armenian`, `geez`, `sogdian`, `old_turkish`) plus alias `armenia`→`armenian`. Use `normalize_language_code()` from `language_registry.py` for resolution.
+CLI accepts `sogdian` plus alias `old_sogdian`. Use `normalize_language_code()` from `language_registry.py` for resolution.
 
-### Syriac Variants
+### Runtime Model Resolution
 
-Printed Syriac has CER-gated fallback logic. The `default` variant uses Tesseract `syr`, then CER-gated switch to `serto`/`east` traineddata when available. **Do not** modify this routing without updating the benchmark thresholds.
-
-### HAR Runtime Model Resolution
-
-API and Gradio startup resolve models from Harness Artifact Registry via `MSOCR_*_HAR_*` env vars. Printed and handwritten paths use separate env var sets.
+API, CLI, and Gradio resolve local Kraken models from explicit `--model`/request fields, `MSOCR_HTR_RUNTIME_MODEL_PATH`, `MSOCR_HTR_MODEL_PATH`, `MSOCR_RUNTIME_MODEL_PATH`, then `models/kraken/sogdian_manuscript.mlmodel`.
 
 ### Segmentation Mode
 
-CATMuS models require **baseline** segmentation (`BaselineLine`), not bounding-box (`BBoxLine`). The code in `msocr/models/inference.py` handles this — do not revert to BBoxLine.
-
-### CLI Flag Distinction
-
-- `--syriac-variant` only affects **printed** OCR routing
-- `--variant` is used for **handwritten** runtime model selection
-- These are different flags with different scopes
-
-### Dry-Run Defaults
-
-`runpod-submit`, `har-publish`, and `pipeline-submit` default to **dry-run** (print plan JSON only). Users must pass `--execute` to actually submit/publish. New commands that submit external resources should follow this pattern.
+Sogdian manuscript recognition uses RTL reading order. Prefer Kraken `horizontal-rl` behavior for segmentation and recognition.
 
 ## Testing
 
@@ -115,14 +93,13 @@ Tests use `pytest` with `monkeypatch` and `tmp_path` fixtures. No special servic
 The `models/` directory is **gitignored** (large binary files). Only placeholder `.gitkeep` files and `models/README.md` are tracked. Models must be downloaded or resolved separately:
 
 - Kraken `.mlmodel` files → `models/kraken/`
-- Tesseract `.traineddata` files → `models/tesseract/`
-- HAR runtime models cache → `models/runtime/` (printed) or `models/runtime/htr/` (handwritten)
+- Default Sogdian runtime model convention → `models/kraken/sogdian_manuscript.mlmodel`
 
-## Benchmark Policy
+## Manifest Policy
 
-- Printed acceptance gate: **CER ≤ 0.05**
-- Handwritten acceptance gate: **CER ≤ 0.10**
 - Manifests live in `data/manifests/` using `.json` format
+- Active manifests must use `language: "sogdian"` and `writing_mode: "handwritten"`
+- Split manifests must isolate `manuscript_id` across partitions
 
 ## Pull Request Process
 

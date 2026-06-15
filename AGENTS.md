@@ -1,12 +1,12 @@
 # AGENTS.md — msocr
 
-Manuscript OCR/HTR toolkit. Kraken + Tesseract engines, route-aware language handling, benchmark/evaluation, RunPod training orchestration, HAR model promotion, FastAPI service, and Gradio demo.
+Focused Sogdian manuscript HTR toolkit. Runtime recognition is local Kraken HTR only, with small supporting tools for preprocessing, ground-truth annotation, local training, a FastAPI service, and a Gradio demo.
 
 ## Quick Start
 
 ```bash
 uv sync                # install dependencies (requires Python 3.12 per .python-version)
-uv run msocr ocr --lang latin test/benchmarks/printed/latin/latin_sample_001.png
+uv run msocr htr --lang sogdian --model models/kraken/sogdian_manuscript.mlmodel /path/to/page.png
 uv run msocr api --host 127.0.0.1 --port 8000
 uv run msocr demo --host 127.0.0.1 --port 7860
 ```
@@ -20,59 +20,43 @@ Single Python package (`msocr/`) with a Click CLI, FastAPI service, and Gradio d
 ```
 msocr/
 ├── cli.py              # All CLI subcommands (click group)
-├── language_registry.py # Canonical language profiles & normalize
-├── pipelines/
-│   ├── printed_ocr.py  # Printed OCR routing (Kraken↔Tesseract)
-│   └── payne_smith.py  # Payne-Smith Syriac training pipeline
+├── language_registry.py # Canonical Sogdian profile & normalize
 ├── models/
-│   └── inference.py    # Kraken/Tesseract inference wrapper
+│   └── inference.py    # Kraken HTR inference wrapper
 ├── service/
-│   ├── api.py          # FastAPI endpoints (/health, /ocr, /htr)
+│   ├── api.py          # FastAPI endpoints (/health, /htr)
 │   ├── gradio_demo.py  # Gradio browser UI
 │   ├── runtime.py      # HTR service dispatcher
 │   ├── deploy.py       # Server startup + runtime smoke checks
 │   └── annotation_api.py  # Annotation session API (port 8001)
 ├── evaluation/
-│   ├── metrics.py      # CER/WER computation
-│   └── printed_benchmark.py
-├── pipeline/
-│   ├── runpod_client.py # RunPod API client
-│   ├── har_client.py   # Harness Artifact Registry client
-│   └── workflow.py     # End-to-end training→benchmark→promotion
+│   └── metrics.py      # CER/WER computation helpers
 ├── training/
 │   └── ketos_trainer.py
 ├── data/
 │   └── manifest.py     # Frozen split manifest loading
 └── output/
-    └── formats.py      # JSON/Markdown/PDF output writers
+    └── formats.py      # JSON/Markdown output writers
 ```
 
 ## Key Conventions
 
-- **Route separation is mandatory**: All code and tests must keep `printed` (OCR) and `handwritten` (HTR) routes strictly separated. The `writing_mode` field (`printed`|`handwritten`) drives routing everywhere — CLI, API, runtime resolution, and benchmarks.
-- **Language codes**: CLI accepts long names (`greek`, `latin`, `syriac`, `coptic`, `armenian`, `geez`, `sogdian`, `old_turkish`) plus alias `armenia`→`armenian`. `normalize_language_code()` in `language_registry.py` resolves them.
-- **Syriac variants**: Printed Syriac has CER-gated fallback logic. `default` uses Tesseract `syr`, then CER-gated switch to `serto`/`east` traineddata when available and reference text shows the threshold is met.
-- **HAR runtime model resolution**: API and Gradio startup resolve models from Harness Artifact Registry via `MSOCR_*_HAR_*` env vars. Printed and handwritten paths use separate env var sets (see README "HAR Runtime Conventions").
+- **HTR-only scope**: Do not reintroduce printed OCR routing, Tesseract fallbacks, RunPod submission, HAR promotion, or pipeline/workflow orchestration.
+- **Language codes**: CLI accepts `sogdian` plus alias `old_sogdian`. `normalize_language_code()` in `language_registry.py` resolves them.
+- **Direction**: Sogdian manuscript handling is RTL. Kraken segmentation and annotation previews should use RTL/horizontal-rl behavior.
+- **Runtime model resolution**: API, CLI, and Gradio resolve local Kraken models from explicit `--model`/request fields, `MSOCR_HTR_RUNTIME_MODEL_PATH`, `MSOCR_HTR_MODEL_PATH`, `MSOCR_RUNTIME_MODEL_PATH`, then `models/kraken/sogdian_manuscript.mlmodel`.
 
 ## CLI Subcommands
 
 | Command | Purpose |
 |---|---|
-| `ocr` | Printed OCR (image/PDF) |
-| `htr` | Handwritten HTR (image/PDF) |
+| `htr` | Sogdian manuscript HTR (image/PDF) |
 | `train` | Kraken ketos training |
 | `preprocess` | Image preprocessing |
-| `benchmark` | Printed benchmark → JSON report |
-| `runpod-submit` | Create/submit RunPod training job |
-| `har-publish` | Publish model to Harness Artifact Registry |
-| `pipeline-submit` | End-to-end train→benchmark→promote workflow |
 | `runtime-smoke-check` | Validate runtime model resolution (local or HTTP) |
 | `api` | FastAPI backend on port 8000 |
 | `annotation-api` | Annotation session API on port 8001 |
 | `demo` | Gradio browser UI on port 7860 |
-| `payne-smith` | Payne-Smith Syriac training pipeline |
-
-**Important**: `runpod-submit`, `har-publish`, and `pipeline-submit` default to **dry-run** (print plan JSON only). Must pass `--execute` to actually submit/publish.
 
 ## Testing
 
@@ -87,32 +71,23 @@ Tests use `pytest` with `monkeypatch` and `tmp_path` fixtures. No special servic
 
 `models/` is **gitignored** (large binary files). Only placeholder `.gitkeep` files and `models/README.md` are tracked. Models must be downloaded or resolved separately:
 - Kraken `.mlmodel` files go under `models/kraken/`
-- Tesseract `.traineddata` files go under `models/tesseract/`
-- HAR runtime models cache to `models/runtime/` (printed) or `models/runtime/htr/` (handwritten)
 
 Key model paths referenced in code:
-- `models/kraken/catmus-print-fondue-large.mlmodel` — Latin printed primary
-- `models/kraken/catmus-medieval-1.5.0.mlmodel` — Latin handwritten
-- `models/kraken/greek-english_porson_sophoclesplaysa05campgoog/` — Greek printed primary
-- `models/tesseract/cop.traineddata` — Coptic
+- `models/kraken/sogdian_manuscript.mlmodel` — default Sogdian manuscript HTR model
 
 ## Benchmarks
 
 - Manifests live in `data/manifests/` and use `.json` format with `manifest_id`, `writing_mode`, `language`, and `partitions` (train/validation/holdout keyed by `manuscript_id`).
-- Acceptance gate: printed `CER ≤ 0.05`, handwritten `CER ≤ 0.10`.
+- Only `language: "sogdian"` and `writing_mode: "handwritten"` are active.
 - `test/benchmarks/` at repo root is gitignored. Benchmark references and manifests under it are not in git.
 
 ## Environment Variables
 
-| Prefix | Scope |
+| Name | Scope |
 |---|---|
-| `MSOCR_PRINTED_RUNTIME_HAR_*` | Printed model HAR resolution (REGISTRY, VERSION, FILENAME, PACKAGE, CACHE_DIR) |
-| `MSOCR_HTR_RUNTIME_HAR_*` | Handwritten model HAR resolution |
-| `MSOCR_HTR_RUNTIME_LANG` | Handwritten runtime language |
-| `MSOCR_HTR_RUNTIME_VARIANT` | Handwritten runtime variant |
-| `MSOCR_NOTIFICATION_URL` | Pipeline webhook notification target |
-| `RUNPOD_SSH_KEY_PATH` | SSH key for RunPod model retrieval |
-| `RUNPOD_SSH_PUBLIC_KEY` | Public key injected into RunPod pod |
+| `MSOCR_HTR_RUNTIME_MODEL_PATH` | Preferred local Kraken model path |
+| `MSOCR_HTR_MODEL_PATH` | Secondary local Kraken model path |
+| `MSOCR_RUNTIME_MODEL_PATH` | Generic local Kraken model path |
 
 ## Python Version
 
@@ -120,12 +95,10 @@ Key model paths referenced in code:
 
 ## Build & Deploy
 
-Docker build: `Dockerfile` uses `python:3.12-slim`, runs `uv sync --frozen`, copies `msocr/`, `models/`, and `source_registry/`. Default CMD is the API server.
+Docker build: `Dockerfile` uses `python:3.12-slim`, runs `uv sync --frozen`, copies `msocr/` and `models/`. Default CMD is the API server.
 
 ## Gotchas
 
-- The segmentation mode for Kraken models matters: CATMuS models require **baseline** segmentation (`BaselineLine`), not bounding-box (`BBoxLine`). The code in `msocr/models/inference.py` handles this — don't revert to BBoxLine.
-- `--syriac-variant` only affects printed OCR routing. Handwritten Syriac uses `--variant` (a different flag).
-- PDF output is not supported for `htr` (only JSON/Markdown).
-- The `payne-smith` subcommand has a `--phases` flag with a very long default value listing all phases. It defaults to dry-run unless `--execute` is passed.
-- `configs/` directory under `msocr/` is currently empty; training configs `sogdian_config.yaml` and `old_turkish_config.yaml` are referenced from `DEFAULT_CONFIGS` in cli.py but don't exist in the checked-out tree — they may need to be created or the references updated.
+- Kraken baseline segmentation and Sogdian RTL direction matter: use `horizontal-rl` for segmented page/line recognition.
+- Output is JSON or Markdown only. Searchable PDF output is intentionally not supported.
+- PDF input is allowed only as a convenience; it is rendered to temporary page images before Kraken HTR.

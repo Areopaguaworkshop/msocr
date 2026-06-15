@@ -23,16 +23,9 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# Install Tesseract OCR engine and language data for supported scripts
+# Install native libraries needed by image processing and Kraken/Pillow runtimes
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-grc \
-    tesseract-ocr-lat \
-    tesseract-ocr-syr \
-    tesseract-ocr-arm \
-    tesseract-ocr-cop \
-    tesseract-ocr-amh \
     libgl1-mesa-glx \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
@@ -46,10 +39,9 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 # Copy application source
 COPY msocr/ ./msocr/
-COPY source_registry/ ./source_registry/
 
-# Copy models directory (must be present at build time for Tesseract data;
-# production deployments should mount models via volume or HAR resolution)
+# Copy models directory. For production, mount a trained Sogdian Kraken model
+# or bake models/kraken/sogdian_manuscript.mlmodel into the image.
 COPY models/ ./models/
 
 # Create non-root user for security

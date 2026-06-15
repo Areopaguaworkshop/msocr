@@ -1,4 +1,4 @@
-"""Model inference for manuscript OCR."""
+"""Model inference for Sogdian manuscript HTR."""
 
 import logging
 import os
@@ -21,7 +21,7 @@ except ImportError:
 
 
 class OCRModel:
-    """OCR model wrapper for trained Kraken models."""
+    """Kraken model wrapper for Sogdian manuscript HTR."""
 
     def __init__(self, model_path: Path):
         if not kraken_available:
@@ -52,7 +52,7 @@ class OCRModel:
             raise ValueError(f"Unsupported device: {device}")
 
     def preprocess_image(self, image_path: Path) -> Any:
-        """Preprocess image for OCR."""
+        """Preprocess image for Kraken recognition."""
         try:
             # Use Kraken's built-in binarization
             from PIL import Image
@@ -75,8 +75,8 @@ class OCRModel:
         
         Args:
             image_path: Path to the image file
-            segmentation_type: Type of segmentation to use - "baseline" for modern Kraken models
-                             or "bbox" for legacy models trained on bounding box segmentation
+            segmentation_type: Type of segmentation to use - "baseline" for page/region images
+                             or "bbox" for already cropped line images.
         """
         if not self.model:
             raise RuntimeError("Model not loaded")
@@ -93,20 +93,24 @@ class OCRModel:
                 # Use proper Kraken baseline segmentation (two-step pipeline)
                 # Step 1: Segment the page into lines using Kraken's blla
                 logger.info("Performing baseline segmentation on page...")
-                bounds = segment(processed_img, device=self.device)
-                
-                # Step 2: Run OCR on segmented lines
-                logger.info("Running OCR recognition on segmented lines...")
+                bounds = segment(
+                    processed_img,
+                    text_direction="horizontal-rl",
+                    device=self.device,
+                )
+
+                # Step 2: Run HTR on segmented lines
+                logger.info("Running HTR recognition on segmented lines...")
                 result = rpred(self.model, processed_img, bounds)
             else:
-                # Bounding box segmentation for legacy models (e.g., Greek models)
+                # Bounding box segmentation for already cropped Sogdian line images.
                 # Add small padding to avoid "Line polygon outside of image bounds" error
                 pad = 2
                 bbox = (pad, pad, width - pad, height - pad)
                 bounds = Segmentation(
                     type="bbox",
                     imagename=str(image_path),
-                    text_direction="horizontal-lr",
+                    text_direction="horizontal-rl",
                     script_detection=False,
                     lines=[BBoxLine(
                         id="0",
@@ -116,7 +120,7 @@ class OCRModel:
                     line_orders=None,
                     language=None,
                 )
-                # Perform OCR with explicit segmentation bounds.
+                # Perform HTR with explicit segmentation bounds.
                 result = rpred(self.model, processed_img, bounds)
 
             # Extract prediction
@@ -155,7 +159,7 @@ class OCRModel:
             processed_img = self.preprocess_image(image_path)
 
             # Perform line segmentation using Kraken's blla
-            lines = segment(processed_img)
+            lines = segment(processed_img, text_direction="horizontal-rl", device=self.device)
 
             # Process each line
             all_predictions = []
@@ -188,7 +192,7 @@ class OCRModel:
 
 def predict(image_path: str, model_path: str, device: str = "cpu", segmentation_type: str = "baseline") -> str:
     """
-    Convenience function for OCR prediction.
+    Convenience function for HTR prediction.
 
     Args:
         image_path: Path to the image file
@@ -197,7 +201,7 @@ def predict(image_path: str, model_path: str, device: str = "cpu", segmentation_
         segmentation_type: Type of segmentation - "baseline" or "bbox"
 
     Returns:
-        OCR result as text
+        HTR result as text
     """
     try:
         # Load model
