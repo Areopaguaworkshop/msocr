@@ -44,8 +44,7 @@ def resolve_htr_runtime_model_path(
     The runtime is intentionally local-only. It accepts an explicit model path,
     then environment overrides, then the checked-in default model location for
     the language. The script variant is kept in the signature because CLI/API
-    callers record it, but model selection is not delegated to an external
-    workflow layer anymore.
+    callers record it, but model selection stays local and direct.
     """
     _ = script_variant
     if model:

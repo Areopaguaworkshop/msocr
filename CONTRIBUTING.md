@@ -57,7 +57,7 @@ msocr/
 
 ### HTR-Only Scope
 
-The active project is Sogdian manuscript HTR only. Do not reintroduce printed OCR routing, Tesseract fallbacks, RunPod submission, HAR promotion, or pipeline/workflow orchestration.
+The active project is Sogdian manuscript HTR only. Do not reintroduce printed OCR routing, Tesseract fallbacks, RunPod submission, HAR promotion, or multi-stage orchestration.
 
 ### Language Codes
 

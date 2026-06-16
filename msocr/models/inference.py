@@ -90,7 +90,7 @@ class OCRModel:
             width, height = processed_img.size
             
             if segmentation_type == "baseline":
-                # Use proper Kraken baseline segmentation (two-step pipeline)
+                # Use Kraken baseline segmentation before HTR recognition.
                 # Step 1: Segment the page into lines using Kraken's blla
                 logger.info("Performing baseline segmentation on page...")
                 bounds = segment(

@@ -209,7 +209,7 @@ msocr/
 ├── language_registry.py
 ├── models/inference.py
 ├── output/formats.py
-├── preprocessing/pipeline.py
+├── preprocessing/preprocessor.py
 ├── segmentation/
 ├── service/
 │   ├── api.py

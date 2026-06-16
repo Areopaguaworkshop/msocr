@@ -269,7 +269,7 @@ def train(lang, config, gt_dir, gt_file, split_manifest_id, split_partition) -> 
 @click.option("--input-dir", "-i", required=True, help="Input directory with manuscript images")
 def preprocess(input_dir) -> None:
     """Preprocess manuscript images for Kraken HTR."""
-    from msocr.preprocessing.pipeline import preprocess_directory
+    from msocr.preprocessing.preprocessor import preprocess_directory
 
     output_dir = Path(input_dir) / "processed"
     preprocess_directory(str(input_dir), str(output_dir))

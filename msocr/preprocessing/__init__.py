@@ -1,5 +1,5 @@
-"""Preprocessing module for manuscript OCR."""
+"""Preprocessing module for manuscript HTR."""
 
-from .pipeline import ManuscriptPreprocessor, preprocess_directory
+from .preprocessor import ManuscriptPreprocessor, preprocess_directory
 
 __all__ = ['ManuscriptPreprocessor', 'preprocess_directory']
