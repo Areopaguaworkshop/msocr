@@ -9,8 +9,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, HTTPException, Request, UploadFile, Request as FastAPIRequest
+from fastapi.responses import FileResponse, Response, HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -21,6 +23,11 @@ from msocr.data.session_manager import (
     SessionManager,
 )
 from msocr.language_registry import is_supported_language, normalize_language_code
+
+_ANNOTATION_UI_DIR = Path(__file__).parent / "annotation_ui"
+_TEMPLATES_DIR = _ANNOTATION_UI_DIR / "templates"
+_STATIC_DIR = _ANNOTATION_UI_DIR / "static"
+_templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
 # Pydantic request models
@@ -126,6 +133,10 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
         version="0.1.0",
         description="API for ground truth collection and annotation",
     )
+
+    # Mount static assets for the annotation UI (HTMX, Alpine.js, vendored).
+    if _STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     @app.post("/api/sessions", response_model=Dict[str, Any])
     async def create_session(request: Request) -> Dict[str, Any]:
@@ -327,7 +338,7 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
     @app.get("/api/languages")
     def list_languages() -> List[Dict[str, Any]]:
         """List supported languages with RTL/LTR direction and web fonts.
-
+    
         Returns:
             List of language metadata
         """
@@ -341,5 +352,61 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
                 }
             )
         return languages
+
+    @app.get("/plan", response_class=HTMLResponse)
+    def plan_page(request: Request) -> HTMLResponse:
+        """Render the design + implementation plan as HTML."""
+        plan_md = Path(__file__).resolve().parents[2] / "docs" / "plans" / "2026-06-17-msocr-training-pipeline-design.md"
+        try:
+            import markdown
+            html_body = markdown.markdown(plan_md.read_text(encoding="utf-8"))
+        except (ImportError, FileNotFoundError):
+            html_body = f"<pre>{plan_md.read_text(encoding='utf-8') if plan_md.exists() else 'plan not found'}</pre>"
+        return _templates.TemplateResponse(request, "plan.html.j2", {
+            "plan_html": html_body,
+            "plan_title": "msocr HTR Training Pipeline Design",
+        })
+
+    @app.get("/ui/{session_id}/{line_n}", response_class=HTMLResponse)
+    def ui_line_view(request: Request, session_id: str, line_n: int) -> HTMLResponse:
+        """Render a single line for annotation: image + RTL textbox + palette."""
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        lines = session.lines
+        if line_n < 1 or line_n > len(lines):
+            raise HTTPException(status_code=404,
+                                detail=f"Line {line_n} out of range (1..{len(lines)})")
+        line = lines[line_n - 1]
+        current_text = session.annotations.get(line.line_id, {}).get("transcript", "")
+        return _templates.TemplateResponse(request, "line.html.j2", {
+            "session_id": session_id,
+            "line_n": line_n,
+            "total_lines": len(lines),
+            "prev_line_n": max(1, line_n - 1),
+            "next_line_n": min(len(lines), line_n + 1),
+            "current_text": current_text,
+            "line_id": line.line_id,
+        })
+
+    @app.post("/api/sessions/{session_id}/line/{line_n}/save")
+    async def save_line_transcription(session_id: str, line_n: int, request: Request) -> Dict[str, Any]:
+        """Save a single line's transcription (HTMX form submit)."""
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        lines = session.lines
+        if line_n < 1 or line_n > len(lines):
+            raise HTTPException(status_code=404, detail=f"Line {line_n} out of range")
+        line = lines[line_n - 1]
+        form = await request.form()
+        transcription = form.get("transcription", "")
+        # Reuse the existing save path: build a one-line annotations dict.
+        annotations = {line.line_id: {"transcript": str(transcription), "skip": False}}
+        updated = manager.save_annotations(session_id, annotations)
+        if updated is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        return {"status": "ok", "line_id": line.line_id, "line_n": line_n}
+
 
     return app

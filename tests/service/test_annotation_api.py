@@ -152,3 +152,29 @@ def test_line_image_endpoint_returns_crop(tmp_path: Path):
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
+
+def test_plan_route_returns_html(tmp_path):
+    from msocr.service.annotation_api import create_app
+    app = create_app(base_dir=tmp_path)
+    client = TestClient(app)
+    resp = client.get("/plan")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    # The plan should mention the design doc title
+    assert "HTR Training Pipeline" in resp.text or "Implementation Plan" in resp.text
+
+def test_ui_line_route_returns_html(tmp_path):
+    """The /ui route returns HTML with a line image and RTL textbox."""
+    from msocr.service.annotation_api import create_app
+    image_path = _make_test_image(tmp_path / "page.png")
+    client = TestClient(create_app(base_dir=tmp_path))
+    # Create a session via the existing endpoint
+    create_resp = client.post("/api/sessions", files=_multipart_payload(image_path))
+    session_id = create_resp.json()["session_id"]
+    # GET the first line UI
+    resp = client.get(f"/ui/{session_id}/1")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "<img" in resp.text
+    assert "dir=\"rtl\"" in resp.text or "dir='rtl'" in resp.text
+    assert "transcription" in resp.text

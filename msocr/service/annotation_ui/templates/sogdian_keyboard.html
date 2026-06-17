@@ -1,0 +1,11 @@
+<div class="palette" x-data>
+  <!-- ponytail: full Sogdian Unicode block U+10F30-U+10F6F, hardcoded.
+       Switch to a config file if a second script block needs its own palette. -->
+  {% set sogdian_chars = [
+    '𐼰','𐼱','𐼲','𐼳','𐼴','𐼵','𐼶','𐼷','𐼸','𐼹',
+    '𐼺','𐼻','𐼼','𐼽','𐼾','𐼿','𐽀','𐽁','𐽂','𐽃','𐽄'
+  ] %}
+  {% for ch in sogdian_chars %}
+    <button type="button" @click="trans += {{ ch | tojson }}">{{ ch }}</button>
+  {% endfor %}
+</div>
