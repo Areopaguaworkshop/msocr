@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -394,6 +395,127 @@ def runtime_smoke_check_command(
     except (RuntimeError, ValueError, FileNotFoundError) as exc:
         raise click.ClickException(str(exc)) from exc
     _print_json(payload)
+
+
+@main.command(name="train-remote")
+@click.option("--manifest", required=True, type=click.Path(path_type=Path),
+              help="Path to the frozen split manifest JSON")
+@click.option("--style-group", required=True, help="style_group_id to train")
+@click.option("--base-model", required=True, type=click.Path(path_type=Path),
+              help="Path to base .safetensors model")
+@click.option("--output-model", required=True, type=click.Path(path_type=Path),
+              help="Path to write the fine-tuned .safetensors model")
+@click.option("--reports-dir", default="reports/", show_default=True,
+              type=click.Path(path_type=Path), help="Directory for evaluation reports")
+@click.option("--pod-gpu", default="RTX 4090", show_default=True,
+              help="RunPod GPU Cloud Pod GPU type id")
+@click.option("--pod-image", default="msocr-kraken7:latest", show_default=True,
+              help="RunPod pod Docker image")
+@click.option("--ssh-key", default="~/.ssh/id_ed25519", show_default=True,
+              help="SSH private key path for the pod")
+@click.option("--epochs", default=50, show_default=True, type=int,
+              help="Max ketos training epochs")
+@click.option("--min-epochs", default=20, show_default=True, type=int,
+              help="Minimum epochs before early stopping is allowed")
+@click.option("--lag", default=10, show_default=True, type=int,
+              help="Early-stop lag (epochs without val improvement)")
+@click.option("--freeze-backbone", default=5000, show_default=True, type=int,
+              help="Number of backbone params to freeze")
+@click.option("--augment/--no-augment", default=True, show_default=True,
+              help="Enable/disable ketos data augmentation")
+@click.option("--device", default="cuda:0", show_default=True,
+              help="Training device on the pod")
+@click.option("--workers", default=8, show_default=True, type=int,
+              help="Dataloader workers on the pod")
+def train_remote(manifest, style_group, base_model, output_model, reports_dir,
+                 pod_gpu, pod_image, ssh_key, epochs, min_epochs, lag,
+                 freeze_backbone, augment, device, workers) -> None:
+    """Train one style-group on a RunPod GPU Cloud Pod, then evaluate locally."""
+    from msocr.training.orchestrator import walk_style_group
+    from msocr.training.runpod_runner import RunPodRunner
+
+    api_key = os.environ.get("RUNPOD_API_KEY")
+    if not api_key:
+        raise click.ClickException(
+            "RUNPOD_API_KEY environment variable is not set. "
+            "Get one from https://console.runpod.io/tokens."
+        )
+
+    runner = RunPodRunner(
+        api_key=api_key,
+        image=pod_image,
+        gpu_type=pod_gpu,
+        ssh_key_path=os.path.expanduser(ssh_key),
+    )
+    try:
+        report = walk_style_group(
+            manifest_path=str(manifest),
+            style_group_id=style_group,
+            runner=runner,
+            base_model_path=str(base_model),
+            output_model_path=str(output_model),
+            reports_dir=str(reports_dir),
+            epochs=epochs,
+            min_epochs=min_epochs,
+            lag=lag,
+            freeze_backbone=freeze_backbone,
+            augment=augment,
+            device=device,
+            workers=workers,
+        )
+    except (RuntimeError, TimeoutError, FileNotFoundError, KeyError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Training complete. Fine-tuned model: {output_model}")
+    click.echo(f"Report: {Path(report.get('report_path', reports_dir))}")
+
+
+@main.command(name="evaluate")
+@click.option("--manifest", required=True, type=click.Path(path_type=Path),
+              help="Path to the frozen split manifest JSON")
+@click.option("--style-group", required=True, help="style_group_id to evaluate")
+@click.option("--model", required=True, type=click.Path(path_type=Path),
+              help="Path to the .safetensors or .mlmodel model to evaluate")
+@click.option("--reports-dir", default="reports/", show_default=True,
+              type=click.Path(path_type=Path), help="Directory for evaluation reports")
+def evaluate(manifest, style_group, model, reports_dir) -> None:
+    """Run ketos test over a style-group's holdout partition and write a report."""
+    from msocr.evaluation.harness import run_evaluation
+
+    try:
+        report = run_evaluation(
+            manifest_path=str(manifest),
+            style_group_id=style_group,
+            model_path=str(model),
+            reports_dir=str(reports_dir),
+        )
+    except (FileNotFoundError, KeyError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    report_files = sorted(Path(reports_dir).glob(f"{report['manifest_id']}__{style_group}__{Path(str(model)).stem}.*"))
+    report_path = report_files[0] if report_files else Path(reports_dir)
+    click.echo(f"Evaluation report: {report_path}")
+
+
+@main.command(name="annotate")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
+@click.option("--port", default=8001, show_default=True, type=int, help="Bind port")
+@click.option("--base-dir", default=".", show_default=True,
+              type=click.Path(path_type=Path),
+              help="Base directory for persisted annotation sessions")
+def annotate(host, port, base_dir) -> None:
+    """Run the annotation API and print the /ui URL.
+
+    ponytail: prints the URL instead of auto-opening a browser — `webbrowser`
+    is flaky in headless/Docker/SSH environments. The user can click the link.
+    """
+    import uvicorn
+
+    from msocr.service.annotation_api import create_app
+
+    app = create_app(base_dir=base_dir)
+    click.echo(f"Annotation UI: http://{host}:{port}/ui")
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
