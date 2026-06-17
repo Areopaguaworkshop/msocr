@@ -1,0 +1,20 @@
+# RunPod GPU Cloud Pod image for remote ketos training.
+# ponytail: python:3.12-slim + uv + kraken 7.0. No CUDA toolkit — RunPod
+# base images provide CUDA; we only need the Python side.
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server libgl1 libglib2.0-0 curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir uv
+
+WORKDIR /workspace
+
+# Install kraken 7.0 + ketos CLI
+RUN uv pip install --system "kraken>=7.0.2"
+
+# SSH key for the runner to connect (RunPod injects the real key at boot)
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+
+# Default: keep the pod alive so the runner can SSH in
+CMD ["sleep", "infinity"]
