@@ -5,7 +5,9 @@
 
 `msocr` is now a focused Sogdian manuscript HTR toolkit. It uses Kraken for local handwritten text recognition, keeps language handling Sogdian-only, and provides small tools for ground-truth preparation, model training, inference, an API, and a Gradio demo.
 
-Removed scope: printed OCR routing, Tesseract fallbacks, benchmark promotion flows, remote training submission, artifact registry publication, and multi-language orchestration.
+Active scope (remote training): RunPod GPU Cloud Pod submission for `ketos train` fine-tuning via `msocr train-remote`, with a minimal procedural per-style-group orchestrator (one style-group at a time, not a DAG engine).
+
+Removed scope: printed OCR routing, Tesseract/OCRmyPDF fallbacks, benchmark promotion flows, artifact registry publication, and multi-language orchestration.
 
 ## Supported Language
 

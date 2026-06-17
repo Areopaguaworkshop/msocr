@@ -57,7 +57,7 @@ msocr/
 
 ### HTR-Only Scope
 
-The active project is Sogdian manuscript HTR only. Do not reintroduce printed OCR routing, Tesseract fallbacks, RunPod submission, HAR promotion, or multi-stage orchestration.
+The active project is Sogdian manuscript HTR with remote training. RunPod GPU Cloud Pod submission is supported for `ketos train` fine-tuning via `msocr train-remote`. Multi-stage orchestration is a minimal procedural walker (one style-group at a time), not a DAG engine. Tesseract/OCRmyPDF/printed-OCR/HAR remain out of scope.
 
 ### Language Codes
 

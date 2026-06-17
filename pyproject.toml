@@ -4,9 +4,9 @@ version = "0.21.0"
 description = "Sogdian manuscript HTR using Kraken"
 authors = [{name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com"}]
 license = {text = "Apache-2.0"}
-requires-python = ">=3.9"
+requires-python = ">=3.10,<3.14"
 dependencies = [
-    "kraken>=5.0.0",
+    "kraken>=7.0.2",
     "opencv-python>=4.8.0",
     "pillow>=10.0.0",
     "numpy>=1.24.0",
@@ -21,6 +21,8 @@ dependencies = [
     "uvicorn>=0.30.0",
     "gradio>=4.44.0",
     "pypdfium2>=4.30.0",
+    "runpod>=1.9.1",
+    "paramiko>=3.5",
 ]
 
 [project.optional-dependencies]

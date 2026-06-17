@@ -27,4 +27,4 @@ manuscript image/PDF → Kraken segmentation → Sogdian HTR model → JSON/Mark
 - `msocr/training/ketos_trainer.py` — local Kraken `ketos` training wrapper
 - `msocr/data/manifest.py` — frozen Sogdian split manifest loader
 
-Removed historical scope: printed OCR routing, Tesseract/OCRmyPDF fallbacks, RunPod submission, HAR promotion, and multi-stage orchestration.
+Active scope: RunPod GPU Cloud Pod training via `msocr train-remote`; procedural per-style-group orchestration. Removed scope: printed OCR routing, Tesseract/OCRmyPDF fallbacks, HAR promotion.

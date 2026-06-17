@@ -41,7 +41,7 @@ msocr/
 
 ## Key Conventions
 
-- **HTR-only scope**: Do not reintroduce printed OCR routing, Tesseract fallbacks, RunPod submission, HAR promotion, or multi-stage orchestration.
+- **HTR scope with remote training**: RunPod GPU Cloud Pod submission is supported for `ketos train` fine-tuning via `msocr train-remote`. Multi-stage orchestration is a minimal procedural walker (one style-group at a time), not a DAG engine. Tesseract/OCRmyPDF/printed-OCR/HAR remain out of scope.
 - **Language codes**: CLI accepts `sogdian` plus alias `old_sogdian`. `normalize_language_code()` in `language_registry.py` resolves them.
 - **Direction**: Sogdian manuscript handling is RTL. Kraken segmentation and annotation previews should use RTL/horizontal-rl behavior.
 - **Runtime model resolution**: API, CLI, and Gradio resolve local Kraken models from explicit `--model`/request fields, `MSOCR_HTR_RUNTIME_MODEL_PATH`, `MSOCR_HTR_MODEL_PATH`, `MSOCR_RUNTIME_MODEL_PATH`, then `models/kraken/sogdian_manuscript.mlmodel`.
