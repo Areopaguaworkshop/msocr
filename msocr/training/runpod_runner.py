@@ -93,17 +93,34 @@ class RunPodRunner:
             sftp.close()
             client.close()
 
+    def upload_artifact(self, local: str, pod_ip: str, remote: str) -> None:
+        """SCP a local file to the pod. Symmetric to download_artifact.
+        Does NOT terminate the pod on failure — let the exception propagate so
+        the caller can recover or terminate explicitly."""
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(pod_ip, username=self.ssh_user,
+                       key_filename=self.ssh_key_path, timeout=60)
+        sftp = client.open_sftp()
+        try:
+            sftp.put(local, remote)
+        finally:
+            sftp.close()
+            client.close()
+
     def terminate_pod(self, pod_id: str) -> None:
         runpod.terminate_pod(pod_id)
 
     def run_training(self, name: str, train_cmd: list[str],
                      artifact_remote_path: str, artifact_local_path: str,
-                     poll_timeout: int = 7200) -> str:
-        """Full lifecycle: submit → ssh train → poll → download → terminate.
+                     poll_timeout: int = 7200,
+                     pre_train_upload: list[tuple[str, str]] | None = None) -> str:
+        """Full lifecycle: submit → [upload] → ssh train → poll → download → terminate.
+        If ``pre_train_upload`` is provided, each ``(local, remote)`` pair is
+        SFTP-put to the pod after submit + IP resolution and before training.
         Returns the local artifact path."""
         pod_id = self.submit_pod(name)
         try:
-            pod = runpod.get_pod(pod_id)
             # ponytail: RunPod assigns the pod an IP after boot; poll for it briefly.
             pod_ip = None
             for _ in range(60):
@@ -114,6 +131,9 @@ class RunPodRunner:
                 time.sleep(10)
             if not pod_ip:
                 raise RuntimeError(f"pod {pod_id} never got an IP")
+            if pre_train_upload:
+                for local, remote in pre_train_upload:
+                    self.upload_artifact(local, pod_ip, remote)
             self.ssh_exec(pod_ip, train_cmd)
             exit_code = self.poll_until_done(pod_id, timeout=poll_timeout)
             if exit_code != 0:

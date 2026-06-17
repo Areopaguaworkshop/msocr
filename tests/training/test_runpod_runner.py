@@ -82,3 +82,36 @@ def test_download_artifact_does_not_terminate_pod_on_failure(monkeypatch):
         runner.download_artifact(pod_ip="1.2.3.4", remote="/workspace/out.safetensors",
                                    local="/tmp/out.safetensors")
     fake_runpod.terminate_pod.assert_not_called()  # key assertion
+
+
+def test_upload_artifact_calls_sftp_put_with_local_and_remote(monkeypatch):
+    """sftp.put is called with the local and remote paths."""
+    fake_runpod = MagicMock()
+    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
+    fake_paramiko = MagicMock()
+    monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    runner.upload_artifact(local="/tmp/train.arrow", pod_ip="1.2.3.4",
+                           remote="/workspace/train.arrow")
+
+    fake_paramiko.SSHClient.return_value.open_sftp.return_value.put.assert_called_once_with(
+        "/tmp/train.arrow", "/workspace/train.arrow"
+    )
+
+
+def test_upload_artifact_does_not_terminate_pod_on_failure(monkeypatch):
+    """If sftp.put fails, the pod is NOT terminated (caller decides recovery)."""
+    fake_runpod = MagicMock()
+    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
+    fake_paramiko = MagicMock()
+    fake_paramiko.SSHClient.return_value.open_sftp.return_value.put.side_effect = Exception("put fail")
+    monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    with pytest.raises(Exception, match="put fail"):
+        runner.upload_artifact(local="/tmp/train.arrow", pod_ip="1.2.3.4",
+                               remote="/workspace/train.arrow")
+    fake_runpod.terminate_pod.assert_not_called()  # key assertion
