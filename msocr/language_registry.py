@@ -63,3 +63,21 @@ def normalize_language_code(value: str) -> str:
 
 def is_supported_language(value: str) -> bool:
     return value.strip().lower() in _ALIASES
+
+
+# Unicode block per script. Sogdian (U+10F30) and Syriac (U+0710) are the two
+# script blocks this project trains HTR models for, per the design doc.
+SCRIPT_BLOCKS = {
+    "sogdian": "U+10F30",   # Sogdian block — Manichaean, Buddhist
+    "syriac": "U+0710",     # Syriac block — Jingjiao/Christian Sogdian
+}
+
+VALID_SCRIPT_BLOCKS = set(SCRIPT_BLOCKS.values())
+
+
+def script_block_for_language(lang: str) -> str:
+    """Resolve the Unicode script block for a language code."""
+    norm = normalize_language_code(lang)
+    if norm not in SCRIPT_BLOCKS:
+        raise ValueError(f"no script_block known for language: {lang}")
+    return SCRIPT_BLOCKS[norm]

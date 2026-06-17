@@ -34,6 +34,7 @@ def test_load_frozen_manifest_resolves_manifest_id_and_paths(tmp_path: Path):
                 "manifest_id": "sogdian-htr-v1",
                 "language": "sogdian",
                 "writing_mode": "handwritten",
+                "script_block": "U+10F30",
                 "base_dir": str(corpus_dir),
                 "partitions": {
                     "train": [
@@ -82,6 +83,7 @@ def test_load_frozen_manifest_rejects_cross_partition_manuscript_overlap(tmp_pat
         json.dumps(
             {
                 "manifest_id": "overlap",
+                "script_block": "U+10F30",
                 "base_dir": str(corpus_dir),
                 "partitions": {
                     "train": [
@@ -106,3 +108,33 @@ def test_load_frozen_manifest_rejects_cross_partition_manuscript_overlap(tmp_pat
 
     with pytest.raises(ValueError, match="manuscript_id"):
         load_frozen_manifest(manifest_path, manifests_dir=manifests_dir)
+
+
+def test_manifest_requires_script_block(tmp_path):
+    """A manifest without script_block is rejected."""
+    manifest = {
+        "manifest_id": "test-v1",
+        "writing_mode": "handwritten",
+        "language": "sogdian",
+        # no script_block
+        "partitions": {"train": [], "validation": [], "holdout": []},
+    }
+    p = tmp_path / "test-v1.json"
+    p.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="script_block"):
+        load_frozen_manifest(str(p))
+
+
+def test_manifest_script_block_validates_against_language_registry(tmp_path):
+    """script_block must match a known block in language_registry."""
+    manifest = {
+        "manifest_id": "test-v1",
+        "writing_mode": "handwritten",
+        "language": "sogdian",
+        "script_block": "U+9999",  # invalid
+        "partitions": {"train": [], "validation": [], "holdout": []},
+    }
+    p = tmp_path / "test-v1.json"
+    p.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="script_block"):
+        load_frozen_manifest(str(p))

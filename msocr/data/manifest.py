@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from msocr.language_registry import VALID_SCRIPT_BLOCKS
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFESTS_DIR = REPO_ROOT / "data" / "manifests"
@@ -47,6 +49,8 @@ class FrozenManifest:
     dvc_tracked: bool
     metadata: Dict[str, Any]
     partitions: Dict[str, List[ManifestCase]]
+    script_block: str = ""
+    style_groups: Optional[Dict[str, Dict[str, Any]]] = None
 
     def get_partition(self, name: str) -> List[ManifestCase]:
         partition_name = _canonical_partition_name(name)
@@ -379,8 +383,21 @@ def load_frozen_manifest(
             "test",
             "base_dir",
             "dvc_tracked",
+            "script_block",
+            "style_groups",
         }
     }
+
+    script_block = payload.get("script_block")
+    if not script_block:
+        raise ValueError(
+            f"Manifest {manifest_path} missing required 'script_block' field"
+        )
+    if script_block not in VALID_SCRIPT_BLOCKS:
+        raise ValueError(
+            f"Manifest {manifest_path} has invalid script_block {script_block!r}; "
+            f"valid: {sorted(VALID_SCRIPT_BLOCKS)}"
+        )
 
     return FrozenManifest(
         manifest_id=manifest_id,
@@ -393,6 +410,8 @@ def load_frozen_manifest(
         ),
         metadata=metadata,
         partitions=partitions,
+        script_block=script_block,
+        style_groups=payload.get("style_groups"),
     )
 
 
@@ -410,3 +429,23 @@ def iter_partition_cases(
         if cases:
             return cases
     return []
+
+
+def iter_style_group_cases(
+    manifest: FrozenManifest,
+    style_group_id: str,
+    partition: str = "train",
+) -> List[ManifestCase]:
+    """Yield ManifestCase objects for a style_group's manuscripts in a partition.
+
+    Raises ValueError if the style_group_id is not in the manifest.
+    """
+    if not manifest.style_groups or style_group_id not in manifest.style_groups:
+        raise ValueError(
+            f"style_group {style_group_id!r} not in manifest {manifest.manifest_id}"
+        )
+    ms_ids = set(manifest.style_groups[style_group_id].get("manuscript_ids", []))
+    return [
+        case for case in manifest.get_partition(partition)
+        if case.manuscript_id in ms_ids
+    ]
