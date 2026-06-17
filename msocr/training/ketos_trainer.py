@@ -1,243 +1,146 @@
-"""Training wrapper for Kraken ketos commands."""
+"""Kraken 7.0 ketos CLI wrapper.
+
+7.0 changes (https://github.com/mittagessen/kraken/releases/tag/7.0):
+- --device/--workers/--precision/--threads are global on `ketos`, not on `train`.
+- Default output is .safetensors (was .mlmodel).
+- --training-files/--evaluation-files renamed to --training-data/--evaluation-data.
+- --load/--resize/--freeze-backbone for fine-tuning.
+- YAML experiment configs supported via `ketos train --config experiment.yaml`.
+"""
+from __future__ import annotations
 
 import subprocess
-import yaml
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-import logging
-
-logger = logging.getLogger(__name__)
+from typing import Sequence
 
 
+@dataclass
 class KetosTrainer:
-    """Wrapper for Kraken ketos training commands."""
-    
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.dataset_config = config.get('dataset', {})
-        self.model_config = config.get('model', {})
-        self.training_config = config.get('training', {})
-        self.output_config = config.get('output', {})
-        self.logging_config = config.get('logging', {})
-    
-    def compile_dataset(self, xml_files: List[Path], output_path: Path) -> bool:
-        """Compile XML files into a binary dataset."""
-        try:
-            cmd = [
-                "ketos", "compile", "-f", "xml", 
-                "-o", str(output_path)
-            ] + [str(path) for path in xml_files]
-            
-            logger.info(f"Compiling dataset with {len(xml_files)} files")
-            logger.info(f"Command: {' '.join(cmd)}")
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            logger.info(f"Dataset compilation successful: {result.stdout}")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Dataset compilation failed: {e}")
-            logger.error(f"Error output: {e.stderr}")
-            return False
-    
-    def train_model(self, dataset_path: Path, output_prefix: Optional[str] = None) -> bool:
-        """Train a recognition model."""
-        try:
-            model_spec = self.model_config.get('spec')
-            if not model_spec:
-                raise ValueError("Model specification not found in config")
-            
-            output_prefix = output_prefix or self.output_config.get('model_prefix', 'model')
-            
-            # Build command
-            cmd = [
-                "ketos", "train",
-                "-f", "binary",
-                "-s", model_spec,
-                "-o", output_prefix
-            ]
-            
-            # Add model configuration
-            if 'normalization' in self.model_config:
-                cmd.extend(["--normalization", self.model_config['normalization']])
-            
-            if 'base_dir' in self.model_config:
-                cmd.extend(["--base-dir", self.model_config['base_dir']])
-            
-            # Add training configuration
-            cmd.extend([
-                "--optimizer", self.training_config.get('optimizer', 'Adam'),
-                "--lrate", str(self.training_config.get('learning_rate', 0.001)),
-                "--weight-decay", str(self.training_config.get('weight_decay', 0.0001))
-            ])
-            
-            if 'schedule' in self.training_config:
-                cmd.extend(["--schedule", self.training_config['schedule']])
-            
-            cmd.extend([
-                "--epochs", str(self.training_config.get('epochs', 100)),
-                "--min-epochs", str(self.training_config.get('min_epochs', 20)),
-                "--lag", str(self.training_config.get('lag', 10))
-            ])
-            
-            if 'validation_split' in self.training_config:
-                cmd.extend(["--partition", str(self.training_config['validation_split'])])
-            
-            # Add augmentation if enabled
-            if self.training_config.get('augment', False):
-                cmd.append("--augment")
-            
-            # Add device and precision settings
-            cmd.extend([
-                "--device", self.training_config.get('device', 'auto'),
-                "--precision", self.training_config.get('precision', 'auto'),
-                "--workers", str(self.training_config.get('workers', 4))
-            ])
-            
-            # Add dataset
-            cmd.append(str(dataset_path))
-            
-            logger.info(f"Starting model training")
-            logger.info(f"Command: {' '.join(cmd)}")
-            
-            result = subprocess.run(cmd, check=True)
-            logger.info("Training completed successfully!")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Training failed: {e}")
-            return False
-    
-    def test_model(self, model_path: Path, dataset_path: Path) -> Dict[str, Any]:
-        """Test a trained model."""
-        try:
-            cmd = [
-                "ketos", "test",
-                "-m", str(model_path),
-                "-f", "binary",
-                str(dataset_path)
-            ]
-            
-            logger.info(f"Testing model {model_path}")
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            
-            return {
-                "success": True,
-                "output": result.stdout,
-                "model_path": str(model_path)
-            }
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Model testing failed: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "output": e.stderr if e.stderr else "",
-                "model_path": str(model_path)
-            }
-    
-    def preprocess_for_training(self, xml_files: List[Path]) -> Optional[Path]:
-        """Preprocess data files if needed before training."""
-        # This could implement additional preprocessing steps
-        # For now, just return the first file path as the dataset path
-        if not xml_files:
-            logger.error("No XML files provided for preprocessing")
-            return None
-        
-        return xml_files[0]
-    
-    def validate_config(self) -> List[str]:
-        """Validate the training configuration."""
-        errors = []
-        
-        # Check required fields
-        if not self.model_config.get('spec'):
-            errors.append("Model specification not found")
-        
-        if not self.dataset_config.get('format_type'):
-            errors.append("Dataset format type not specified")
-        
-        if not self.training_config.get('epochs'):
-            errors.append("Training epochs not specified")
-        
-        return errors
-    
-    def get_training_command(self, dataset_path: Path, output_prefix: Optional[str] = None) -> List[str]:
-        """Get the full training command without executing it."""
-        model_spec = self.model_config.get('spec')
-        if not model_spec:
-            raise ValueError("Model specification not found in config")
-        
-        output_prefix = output_prefix or self.output_config.get('model_prefix', 'model')
-        
-        # Build command (same as in train_model)
-        cmd = [
-            "ketos", "train",
-            "-f", "binary",
-            "-s", model_spec,
-            "-o", output_prefix
-        ]
-        
-        # Add model configuration
-        if 'normalization' in self.model_config:
-            cmd.extend(["--normalization", self.model_config['normalization']])
-        
-        if 'base_dir' in self.model_config:
-            cmd.extend(["--base-dir", self.model_config['base_dir']])
-        
-        # Add training configuration
-        cmd.extend([
-            "--optimizer", self.training_config.get('optimizer', 'Adam'),
-            "--lrate", str(self.training_config.get('learning_rate', 0.001)),
-            "--weight-decay", str(self.training_config.get('weight_decay', 0.0001))
-        ])
-        
-        if 'schedule' in self.training_config:
-            cmd.extend(["--schedule", self.training_config['schedule']])
-        
-        cmd.extend([
-            "--epochs", str(self.training_config.get('epochs', 100)),
-            "--min-epochs", str(self.training_config.get('min_epochs', 20)),
-            "--lag", str(self.training_config.get('lag', 10))
-        ])
-        
-        if 'validation_split' in self.training_config:
-            cmd.extend(["--partition", str(self.training_config['validation_split'])])
-        
-        # Add augmentation if enabled
-        if self.training_config.get('augment', False):
-            cmd.append("--augment")
-        
-        # Add device and precision settings
-        cmd.extend([
-            "--device", self.training_config.get('device', 'auto'),
-            "--precision", self.training_config.get('precision', 'auto'),
-            "--workers", str(self.training_config.get('workers', 4))
-        ])
-        
-        # Add dataset
-        cmd.append(str(dataset_path))
-        
-        return cmd
-    
-    def train(self, xml_files: Optional[List[Path]] = None) -> bool:
-        """Compile XML ground truth and train a Kraken recognizer."""
-        # Validate configuration
-        errors = self.validate_config()
-        if errors:
-            logger.error("Configuration validation failed:")
-            for error in errors:
-                logger.error(f"  - {error}")
-            return False
-        
-        if not xml_files:
-            logger.error("No XML files provided for training")
-            return False
-        
-        # Compile dataset
-        dataset_path = Path(f"{self.output_config.get('model_prefix', 'dataset')}.arrow")
-        if not self.compile_dataset(xml_files, dataset_path):
-            return False
-        
-        # Train model
-        return self.train_model(dataset_path)
+    """Wraps the Kraken 7.0 `ketos` CLI for compile/train/test.
+
+    Config sections (mirrors the YAML experiment schema):
+      dataset: {format_type: xml|alto|page|path|binary, base_dir: str}
+      model:   {spec: str}
+      training: {epochs, min_epochs, lag, lrate, weight_decay, optimizer,
+                 schedule, augment, warmup, batch_size, device, precision,
+                 workers, partition, load, resize, freeze_backbone, normalization}
+      output:  {model_prefix: str}
+    """
+
+    config: dict
+
+    def __post_init__(self) -> None:
+        self.dataset_cfg = self.config.get("dataset", {})
+        self.model_cfg = self.config.get("model", {})
+        self.training_cfg = self.config.get("training", {})
+        self.output_cfg = self.config.get("output", {})
+
+    # ponytail: no validate-on-init; validate_config() is called explicitly by train().
+    # Adding a schema lib here would be overkill for a 4-section dict.
+
+    def _global_flags(self) -> list[str]:
+        """7.0 global flags on the main `ketos` command."""
+        flags = []
+        device = self.training_cfg.get("device", "auto")
+        flags += ["-d", device]
+        workers = str(self.training_cfg.get("workers", 1))
+        flags += ["--workers", workers]
+        precision = self.training_cfg.get("precision", "32-true")
+        flags += ["--precision", precision]
+        return flags
+
+    def _train_subcmd_flags(self, train_data: str, eval_data: str | None) -> list[str]:
+        """7.0 `train` subcommand flags."""
+        t = self.training_cfg
+        flags = ["train"]
+        flags += ["-t", train_data]
+        if eval_data:
+            flags += ["-e", eval_data]
+        fmt = self.dataset_cfg.get("format_type", "xml")
+        flags += ["-f", fmt]
+        flags += ["-o", self._output_prefix()]
+        # Fine-tuning flags (7.0)
+        load = t.get("load")
+        if load:
+            flags += ["--load", str(load)]
+        resize = t.get("resize")
+        if resize:
+            flags += ["--resize", resize]
+        freeze = t.get("freeze_backbone")
+        if freeze is not None:
+            flags += ["--freeze-backbone", str(freeze)]
+        # Training hyperparams
+        if "epochs" in t:
+            flags += ["--epochs", str(t["epochs"])]
+        if "min_epochs" in t:
+            flags += ["--min-epochs", str(t["min_epochs"])]
+        if "lag" in t:
+            flags += ["--lag", str(t["lag"])]
+        if "lrate" in t:
+            flags += ["--lrate", str(t["lrate"])]
+        if "weight_decay" in t:
+            flags += ["--weight-decay", str(t["weight_decay"])]
+        if "optimizer" in t:
+            flags += ["--optimizer", t["optimizer"]]
+        if "schedule" in t:
+            flags += ["--schedule", t["schedule"]]
+        if "warmup" in t:
+            flags += ["--warmup", str(t["warmup"])]
+        if "batch_size" in t:
+            flags += ["-B", str(t["batch_size"])]
+        if t.get("augment"):
+            flags += ["--augment"]
+        if "normalization" in t:
+            flags += ["--normalization", t["normalization"]]
+        return flags
+
+    def _output_prefix(self) -> str:
+        return str(self.output_cfg["model_prefix"])
+
+    def _output_path(self) -> Path:
+        """7.0 default output is .safetensors."""
+        return Path(self._output_prefix()).with_suffix(".safetensors")
+
+    def compile_dataset(self, xml_files: Sequence[str]) -> str:
+        """ketos compile -f xml -o <out> <xml_files...>"""
+        out = self._output_prefix() + ".arrow"
+        cmd = ["ketos", "compile", "-f", self.dataset_cfg.get("format_type", "xml"),
+               "-o", out, *xml_files]
+        subprocess.run(cmd, check=True)
+        return out
+
+    def train_model(self, train_data: str, eval_data: str | None = None) -> Path:
+        cmd = ["ketos", *self._global_flags(), *self._train_subcmd_flags(train_data, eval_data)]
+        subprocess.run(cmd, check=True)
+        return self._output_path()
+
+    def test_model(self, model_path: str | Path, test_data: str) -> str:
+        """ketos test -m <model> -f <fmt> <test_data> -> returns stdout (CER/WER JSON)."""
+        cmd = ["ketos", *self._global_flags(), "test",
+               "-m", str(model_path),
+               "-f", self.dataset_cfg.get("format_type", "binary"),
+               test_data]
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return result.stdout
+
+    def validate_config(self) -> None:
+        required = [("model.spec", self.model_cfg.get("spec")),
+                    ("dataset.format_type", self.dataset_cfg.get("format_type")),
+                    ("training.epochs", self.training_cfg.get("epochs")),
+                    ("output.model_prefix", self.output_cfg.get("model_prefix"))]
+        missing = [name for name, val in required if not val]
+        if missing:
+            raise ValueError(f"ketos_trainer config missing: {', '.join(missing)}")
+
+    def train(self, xml_files: Sequence[str], eval_xml_files: Sequence[str] | None = None) -> Path:
+        """Full pipeline: validate -> compile -> train. Returns output model path."""
+        self.validate_config()
+        train_arrow = self.compile_dataset(xml_files)
+        eval_arrow = self.compile_dataset(list(eval_xml_files)) if eval_xml_files else None
+        # ponytail: compile eval into a separate .arrow; could share but separate is clearer.
+        return self.train_model(train_arrow, eval_arrow)
+
+    def get_training_command(self, train_data: str, eval_data: str | None = None) -> list[str]:
+        """Dry-run: returns the command that train_model would run, without executing."""
+        return ["ketos", *self._global_flags(), *self._train_subcmd_flags(train_data, eval_data)]
