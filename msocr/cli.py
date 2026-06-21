@@ -277,6 +277,51 @@ def preprocess(input_dir) -> None:
     click.echo(f"Preprocessed images saved to {output_dir}")
 
 
+def _parse_roi(roi: str | None) -> tuple[int, int, int, int] | None:
+    if roi is None:
+        return None
+    parts = [part.strip() for part in roi.split(",")]
+    if len(parts) != 4:
+        raise click.ClickException("--roi must be LEFT,TOP,RIGHT,BOTTOM")
+    try:
+        return tuple(int(part) for part in parts)  # type: ignore[return-value]
+    except ValueError as exc:
+        raise click.ClickException("--roi values must be integers") from exc
+
+
+def _parse_row_centers(row_centers: str | None) -> list[int] | None:
+    if row_centers is None:
+        return None
+    try:
+        return [int(part.strip()) for part in row_centers.split(",") if part.strip()]
+    except ValueError as exc:
+        raise click.ClickException("--row-centers values must be integers") from exc
+
+
+@main.command(name="extract-lines")
+@click.argument("image", type=click.Path(path_type=Path, exists=True))
+@click.option("--expected-lines", required=True, type=int, help="Exact manuscript line count to output")
+@click.option("--output-dir", required=True, type=click.Path(path_type=Path), help="Directory for crops and QA images")
+@click.option("--roi", help="Optional text region as LEFT,TOP,RIGHT,BOTTOM")
+@click.option("--row-centers", help="Optional comma-separated row center y-coordinates")
+@click.option("--min-component-area", default=20, show_default=True, type=int, help="Ignore smaller ink flecks")
+def extract_lines(image, expected_lines, output_dir, roi, row_centers, min_component_area) -> None:
+    """Extract exact-count fragmented manuscript row crops."""
+    from msocr.segmentation.row_bands import extract_row_bands
+
+    bands = extract_row_bands(
+        image,
+        output_dir,
+        expected_lines=expected_lines,
+        roi=_parse_roi(roi),
+        row_centers=_parse_row_centers(row_centers),
+        min_component_area=min_component_area,
+    )
+    click.echo(f"Extracted {len(bands)} lines to {output_dir / 'lines'}")
+    click.echo(f"Overlay: {output_dir / 'line_overlay.jpg'}")
+    click.echo(f"Contact sheet: {output_dir / 'line_contact_sheet.jpg'}")
+
+
 @main.command(name="api")
 @click.option("--host", default="0.0.0.0", show_default=True, help="Bind host")
 @click.option("--port", default=8000, show_default=True, type=int, help="Bind port")
@@ -514,7 +559,9 @@ def annotate(host, port, base_dir) -> None:
     from msocr.service.annotation_api import create_app
 
     app = create_app(base_dir=base_dir)
-    click.echo(f"Annotation UI: http://{host}:{port}/ui")
+    sessions = sorted((base_dir / "sessions").glob("*/session.json"))
+    suffix = f"/ui/{sessions[0].parent.name}" if sessions else "/ui/{session_id}"
+    click.echo(f"Annotation UI: http://{host}:{port}{suffix}")
     uvicorn.run(app, host=host, port=port)
 
 

@@ -1,0 +1,48 @@
+{
+  "manifest_id": "christian-sogdian-c2av-image19-smoke",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
+  "script_block": "U+0710",
+  "script_variant": "christian-syriac-script",
+  "base_dir": "dataset/smoke/christian_sogdian_c2av_image19",
+  "partitions": {
+    "train": [
+      {
+        "id": "c2av19-page-19-train",
+        "manuscript_id": "c2av19",
+        "xml_path": "gt/c2av19_page_19.xml"
+      }
+    ],
+    "validation": [
+      {
+        "id": "c2av19-page-19-val",
+        "manuscript_id": "c2av19-validation",
+        "xml_path": "gt/c2av19_page_19.xml"
+      }
+    ],
+    "holdout": [
+      {
+        "id": "c2av19-page-19-holdout",
+        "manuscript_id": "c2av19-holdout",
+        "xml_path": "gt/c2av19_page_19.xml"
+      }
+    ]
+  },
+  "style_groups": {
+    "christian-syriac-script-smoke": {
+      "manuscript_ids": [
+        "c2av19",
+        "c2av19-validation",
+        "c2av19-holdout"
+      ],
+      "description": "Tiny smoke-test set from Sims-Williams 1985 Christian Sogdian MS C2AV Berlin plate image 19."
+    }
+  },
+  "metadata": {
+    "source_pdf": "SimsWilliams-1985-ChristianSogdianMsC2AVBerlin-Plates.pdf",
+    "source_pdf_page": 19,
+    "annotation_session_id": "c2av19",
+    "line_count": 11,
+    "notes": "Blank transcripts initially. Use annotation UI, then export PAGE XML to overwrite gt/c2av19_page_19.xml before training."
+  }
+}

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="sog" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Annotation - {{ session_id }}</title>
+  <style>
+    :root { --fg: #1f1f1f; --muted: #666; --bg: #f7f7f5; --paper: #fff; --border: #c9c9c4; --accent: #0b5cab; --ok: #1f7a3d; }
+    body { margin: 0; color: var(--fg); background: var(--bg); font-family: "Noto Sans Sogdian", "Estrangelo Edessa", "Segoe UI", system-ui, sans-serif; }
+    header { position: sticky; top: 0; z-index: 2; background: rgba(247, 247, 245, 0.96); border-bottom: 1px solid var(--border); padding: 0.75rem 1rem; }
+    .bar { max-width: 980px; margin: 0 auto; display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; direction: ltr; }
+    h1 { margin: 0; font-size: 1rem; font-weight: 650; letter-spacing: 0; }
+    .actions { display: flex; gap: 0.5rem; align-items: center; }
+    button, a.button { min-height: 2.25rem; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; background: var(--paper); color: var(--fg); cursor: pointer; text-decoration: none; font: inherit; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    main { max-width: 980px; margin: 0 auto; padding: 1rem; }
+    .palette { position: sticky; top: 3.8rem; z-index: 1; direction: rtl; display: flex; flex-wrap: wrap; gap: 0.25rem; padding: 0.5rem; margin-bottom: 1rem; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .palette button { min-width: 2.1rem; padding: 0.25rem 0.4rem; font-size: 1.2rem; }
+    .line { background: var(--paper); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 1rem; overflow: hidden; }
+    .line-head { direction: ltr; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 0.9rem; }
+    .line img { display: block; max-width: 100%; width: auto; margin: 0.75rem auto; border: 1px solid var(--border); background: #eee; }
+    .editor { padding: 0 0.75rem 0.75rem; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 4.2rem; resize: vertical; border: 1px solid var(--border); border-radius: 4px; padding: 0.65rem; direction: rtl; font-family: "Noto Sans Sogdian", "Estrangelo Edessa", serif; font-size: 1.45rem; line-height: 1.6; background: #fff; }
+    textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent), transparent 70%); border-color: var(--accent); }
+    label.skip { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.55rem; color: var(--muted); direction: ltr; font-size: 0.9rem; }
+    .status { direction: ltr; min-width: 5rem; text-align: right; font-size: 0.85rem; color: var(--muted); }
+    .status.saved { color: var(--ok); }
+    @media (max-width: 640px) {
+      .bar { align-items: stretch; flex-direction: column; }
+      .actions { justify-content: space-between; }
+      main { padding: 0.75rem; }
+      textarea { font-size: 1.25rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1>{{ session_id }} · {{ lines|length }} lines</h1>
+      <div class="actions">
+        <button class="primary" type="button" id="save-all">Save all</button>
+        <a class="button" href="/api/sessions/{{ session_id }}/export?format=page">Export PAGE XML</a>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="palette" aria-label="Syriac helper palette">
+      {% if 'syriac' in script_variant %}
+        {% set chars = [
+          'ܐ','ܒ','ܓ','ܕ','ܗ','ܘ','ܙ','ܚ','ܛ','ܝ','ܟ','ܠ','ܡ','ܢ','ܣ','ܥ','ܦ','ܨ','ܩ','ܪ','ܫ','ܬ',
+          'ܰ','ܱ','ܲ','ܳ','ܴ','ܵ','ܶ','ܷ','ܸ','ܹ','ܺ','ܻ','ܼ','ܽ','ܾ','ܿ'
+        ] %}
+      {% else %}
+        {% set chars = [
+          '𐼰','𐼱','𐼲','𐼳','𐼴','𐼵','𐼶','𐼷','𐼸','𐼹',
+          '𐼺','𐼻','𐼼','𐼽','𐼾','𐼿','𐽀','𐽁','𐽂','𐽃','𐽄'
+        ] %}
+      {% endif %}
+      {% for ch in chars %}
+        <button type="button" data-char="{{ ch }}">{{ ch }}</button>
+      {% endfor %}
+    </div>
+
+    {% for line in lines %}
+      <section class="line" data-line-n="{{ line.line_n }}">
+        <div class="line-head">
+          <span>{{ line.line_id }}</span>
+          <span class="status" id="status-{{ line.line_n }}">not saved</span>
+        </div>
+        <img src="/api/sessions/{{ session_id }}/line/{{ line.line_n }}/image" alt="{{ line.line_id }}">
+        <div class="editor">
+          <textarea name="transcription" dir="rtl" lang="sog" autocomplete="off">{{ line.transcription }}</textarea>
+          <label class="skip">
+            <input type="checkbox" name="skip" {% if line.skip %}checked{% endif %}>
+            skip line
+          </label>
+        </div>
+      </section>
+    {% endfor %}
+  </main>
+  <script>
+    let active = document.querySelector("textarea");
+
+    function setStatus(line, text, saved) {
+      const status = document.getElementById(`status-${line.dataset.lineN}`);
+      status.textContent = text;
+      status.classList.toggle("saved", saved);
+    }
+
+    async function saveLine(line) {
+      const data = new FormData();
+      data.set("transcription", line.querySelector("textarea").value);
+      if (line.querySelector("[name='skip']").checked) data.set("skip", "on");
+      setStatus(line, "saving...", false);
+      const res = await fetch(`/api/sessions/{{ session_id }}/line/${line.dataset.lineN}/save`, {
+        method: "POST",
+        body: data
+      });
+      setStatus(line, res.ok ? "saved" : "error", res.ok);
+    }
+
+    document.querySelectorAll("textarea").forEach((textarea) => {
+      textarea.addEventListener("focus", () => { active = textarea; });
+      textarea.addEventListener("blur", () => saveLine(textarea.closest(".line")));
+      textarea.addEventListener("input", () => setStatus(textarea.closest(".line"), "changed", false));
+    });
+
+    document.querySelectorAll("[name='skip']").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => saveLine(checkbox.closest(".line")));
+    });
+
+    document.querySelectorAll(".palette [data-char]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!active) return;
+        active.setRangeText(button.dataset.char, active.selectionStart, active.selectionEnd, "end");
+        active.focus();
+        setStatus(active.closest(".line"), "changed", false);
+      });
+    });
+
+    document.getElementById("save-all").addEventListener("click", async () => {
+      for (const line of document.querySelectorAll(".line")) await saveLine(line);
+    });
+  </script>
+</body>
+</html>

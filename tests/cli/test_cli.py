@@ -38,6 +38,12 @@ def test_annotate_help_lists_all_flags():
         assert flag in out, f"missing {flag!r} in annotate help"
 
 
+def test_extract_lines_help_lists_all_flags():
+    out = _help_flags("extract-lines")
+    for flag in ["--expected-lines", "--output-dir", "--roi", "--row-centers", "--min-component-area"]:
+        assert flag in out, f"missing {flag!r} in extract-lines help"
+
+
 def test_train_remote_requires_runpod_api_key(tmp_path, monkeypatch):
     """No RUNPOD_API_KEY -> ClickException before any pod call is made."""
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
@@ -58,5 +64,5 @@ def test_main_help_lists_new_subcommands():
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0, result.output
     out = result.output
-    for name in ["train-remote", "evaluate", "annotate"]:
+    for name in ["train-remote", "evaluate", "annotate", "extract-lines"]:
         assert name in out, f"missing {name!r} in top-level help"

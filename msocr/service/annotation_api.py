@@ -387,6 +387,27 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
             "next_line_n": min(len(lines), line_n + 1),
             "current_text": current_text,
             "line_id": line.line_id,
+            "script_variant": session.script_variant,
+        })
+
+    @app.get("/ui/{session_id}", response_class=HTMLResponse)
+    def ui_session_view(request: Request, session_id: str) -> HTMLResponse:
+        """Render all line crops for one annotation session."""
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        return _templates.TemplateResponse(request, "session.html.j2", {
+            "session_id": session_id,
+            "lines": [
+                {
+                    "line_id": line.line_id,
+                    "line_n": idx,
+                    "transcription": session.annotations.get(line.line_id, {}).get("transcript", ""),
+                    "skip": session.annotations.get(line.line_id, {}).get("skip", False),
+                }
+                for idx, line in enumerate(session.lines, start=1)
+            ],
+            "script_variant": session.script_variant,
         })
 
     @app.post("/api/sessions/{session_id}/line/{line_n}/save")
@@ -401,12 +422,13 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
         line = lines[line_n - 1]
         form = await request.form()
         transcription = form.get("transcription", "")
-        # Reuse the existing save path: build a one-line annotations dict.
-        annotations = {line.line_id: {"transcript": str(transcription), "skip": False}}
+        skip = str(form.get("skip", "")).lower() in {"1", "true", "on", "yes"}
+        annotations = dict(session.annotations)
+        annotations[line.line_id] = {"transcript": str(transcription), "skip": skip}
         updated = manager.save_annotations(session_id, annotations)
         if updated is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        return {"status": "ok", "line_id": line.line_id, "line_n": line_n}
+        return {"status": "ok", "line_id": line.line_id, "line_n": line_n, "skip": skip}
 
 
     return app

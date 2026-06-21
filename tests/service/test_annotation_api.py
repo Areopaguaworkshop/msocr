@@ -178,3 +178,100 @@ def test_ui_line_route_returns_html(tmp_path):
     assert "<img" in resp.text
     assert "dir=\"rtl\"" in resp.text or "dir='rtl'" in resp.text
     assert "transcription" in resp.text
+
+
+def test_line_save_preserves_existing_annotations(tmp_path):
+    from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
+    from msocr.service.annotation_api import create_app
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create_session(
+        language="sogdian",
+        script_variant="christian-syriac-script",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.png",
+        lines=[LineSegment(line_id="line_001", order=1), LineSegment(line_id="line_002", order=2)],
+    )
+    manager.save_annotations(session.session_id, {"line_001": {"transcript": "ܐ", "skip": False}})
+
+    client = TestClient(create_app(base_dir=tmp_path))
+    response = client.post(
+        f"/api/sessions/{session.session_id}/line/2/save",
+        data={"transcription": "ܒ"},
+    )
+
+    assert response.status_code == 200
+    annotations = client.get(f"/api/sessions/{session.session_id}").json()["annotations"]
+    assert annotations["line_001"]["transcript"] == "ܐ"
+    assert annotations["line_002"]["transcript"] == "ܒ"
+
+
+def test_line_save_accepts_skip_checkbox(tmp_path):
+    from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
+    from msocr.service.annotation_api import create_app
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create_session(
+        language="sogdian",
+        script_variant="christian-syriac-script",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.png",
+        lines=[LineSegment(line_id="line_001", order=1)],
+    )
+
+    client = TestClient(create_app(base_dir=tmp_path))
+    response = client.post(
+        f"/api/sessions/{session.session_id}/line/1/save",
+        data={"transcription": "ܐ", "skip": "on"},
+    )
+
+    assert response.status_code == 200
+    annotation = client.get(f"/api/sessions/{session.session_id}").json()["annotations"]["line_001"]
+    assert annotation == {"transcript": "ܐ", "skip": True}
+
+
+def test_ui_session_route_shows_all_lines_with_autosave(tmp_path):
+    from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
+    from msocr.service.annotation_api import create_app
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create_session(
+        language="sogdian",
+        script_variant="christian-syriac-script",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.png",
+        lines=[LineSegment(line_id="line_001", order=1), LineSegment(line_id="line_002", order=2)],
+    )
+    manager.save_annotations(session.session_id, {"line_001": {"transcript": "ܐ", "skip": False}})
+
+    client = TestClient(create_app(base_dir=tmp_path))
+    response = client.get(f"/ui/{session.session_id}")
+
+    assert response.status_code == 200
+    assert response.text.count("<textarea") == 2
+    assert "/line/1/image" in response.text
+    assert "/line/2/image" in response.text
+    assert "blur" in response.text
+    assert "Export PAGE XML" in response.text
+    assert "ܐ" in response.text
+
+
+def test_ui_line_route_uses_syriac_palette_for_christian_script_variant(tmp_path):
+    from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
+    from msocr.service.annotation_api import create_app
+
+    manager = SessionManager(tmp_path / "sessions")
+    session = manager.create_session(
+        language="sogdian",
+        script_variant="christian-syriac-script",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.png",
+        lines=[LineSegment(line_id="line_001", order=1)],
+    )
+
+    client = TestClient(create_app(base_dir=tmp_path))
+    response = client.get(f"/ui/{session.session_id}/1")
+
+    assert response.status_code == 200
+    assert "ܐ" in response.text
+    assert "𐼰" not in response.text

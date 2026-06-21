@@ -582,7 +582,7 @@ class SessionManager:
         with Image.open(page_path) as img:
             width, height = img.size
             for order, geometry in enumerate(geometries, start=1):
-                bbox = self._clamp_bbox(geometry["bbox"], width, height)
+                bbox = self._padded_bbox(geometry["bbox"], width, height)
                 crop = img.crop(bbox).convert("RGB")
                 filename = f"line_{order:03d}.jpg"
                 crop_path = crops_dir / filename
@@ -608,6 +608,19 @@ class SessionManager:
         right = min(max(right, left + 1), max(width, left + 1))
         bottom = min(max(bottom, top + 1), max(height, top + 1))
         return left, top, right, bottom
+
+    def _padded_bbox(
+        self, bbox: Tuple[int, int, int, int], width: int, height: int
+    ) -> Tuple[int, int, int, int]:
+        left, top, right, bottom = (int(v) for v in bbox)
+        line_height = max(bottom - top, 1)
+        pad_x = max(24, line_height // 2)
+        pad_y = max(8, line_height // 5)
+        return self._clamp_bbox(
+            (left - pad_x, top - pad_y, right + pad_x, bottom + pad_y),
+            width,
+            height,
+        )
 
     def _export_alto(self, session: AnnotationSession) -> str:
         """Export session to ALTO XML format."""

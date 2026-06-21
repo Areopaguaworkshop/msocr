@@ -95,6 +95,10 @@ def test_manual_segmentation_sets_review_flag(session_manager: SessionManager):
     assert session.needs_manual_review is True
 
 
+def test_line_crop_bbox_is_padded_and_clamped(session_manager: SessionManager):
+    assert session_manager._padded_bbox((10, 10, 50, 40), 100, 80) == (0, 2, 74, 48)
+
+
 def test_save_page_image_from_local_file(session_manager: SessionManager, tmp_path: Path):
     source = tmp_path / "source.tif"
     source.write_bytes(b"image_data")
