@@ -10,9 +10,8 @@ logger = logging.getLogger(__name__)
 # Kraken imports - these will work when kraken is installed
 try:
     from kraken import binarization
-    from kraken.blla import segment
-    from kraken.lib import models
-    from kraken.rpred import rpred
+    from kraken.tasks import RecognitionTaskModel, SegmentationTaskModel
+    from kraken.configs import RecognitionInferenceConfig, SegmentationInferenceConfig
 
     kraken_available = True
 except ImportError:
@@ -33,16 +32,22 @@ class OCRModel:
 
         self.model = None
         self.device = "cpu"
+        self._seg_model = None
         self._load_model()
 
     def _load_model(self):
         """Load the Kraken model."""
         try:
-            self.model = models.load_any(self.model_path)
+            self.model = RecognitionTaskModel.load_model(self.model_path)
             logger.info(f"Loaded model from {self.model_path}")
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             raise
+
+    def _get_seg_model(self):
+        if self._seg_model is None:
+            self._seg_model = SegmentationTaskModel.load_model()
+        return self._seg_model
 
     def set_device(self, device: str):
         """Set inference device."""
@@ -93,15 +98,18 @@ class OCRModel:
                 # Use Kraken baseline segmentation before HTR recognition.
                 # Step 1: Segment the page into lines using Kraken's blla
                 logger.info("Performing baseline segmentation on page...")
-                bounds = segment(
+                bounds = self._get_seg_model().predict(
                     processed_img,
-                    text_direction="horizontal-rl",
-                    device=self.device,
+                    SegmentationInferenceConfig(text_direction="horizontal-rl", device=self.device),
                 )
 
                 # Step 2: Run HTR on segmented lines
                 logger.info("Running HTR recognition on segmented lines...")
-                result = rpred(self.model, processed_img, bounds)
+                result = self.model.predict(
+                    processed_img,
+                    segmentation=bounds,
+                    config=RecognitionInferenceConfig(),
+                )
             else:
                 # Bounding box segmentation for already cropped Sogdian line images.
                 # Add small padding to avoid "Line polygon outside of image bounds" error
@@ -121,7 +129,11 @@ class OCRModel:
                     language=None,
                 )
                 # Perform HTR with explicit segmentation bounds.
-                result = rpred(self.model, processed_img, bounds)
+                result = self.model.predict(
+                    processed_img,
+                    segmentation=bounds,
+                    config=RecognitionInferenceConfig(),
+                )
 
             # Extract prediction
             predictions = []
@@ -209,7 +221,7 @@ def validate_model(model_path: Path) -> bool:
             return False
 
         # Try to load the model
-        models.load_any(model_path)
+        RecognitionTaskModel.load_model(model_path)
         return True
 
     except Exception:

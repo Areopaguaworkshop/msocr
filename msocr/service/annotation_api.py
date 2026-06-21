@@ -41,6 +41,10 @@ class CreateSessionRequest(BaseModel):
         description="Source of the image: browser_upload, local_file, or iiif_manifest",
     )
     source: Optional[str] = Field(default=None, description="Source path or URL")
+    crop_manuscript_area: bool = Field(
+        default=True,
+        description="Detect and crop to manuscript area before line segmentation",
+    )
 
 
 class AnnotationItem(BaseModel):
@@ -111,11 +115,14 @@ def _serialize_session(session) -> Dict[str, Any]:
     }
 
 
-def create_app(base_dir: Optional[Path] = None) -> FastAPI:
+def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = True) -> FastAPI:
     """Create FastAPI application for annotation API.
 
     Args:
         base_dir: Base directory for session storage. Defaults to temp directory.
+        crop_manuscript_area: App-level default for manuscript-area cropping.
+            A request's ``crop_manuscript_area`` field is ANDed with this — the CLI
+            ``--no-crop-manuscript-area`` flag forces it off regardless of request.
 
     Returns:
         FastAPI application instance
@@ -127,6 +134,7 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
 
     sessions_dir = base_dir / "sessions"
     manager = SessionManager(sessions_dir=sessions_dir)
+    app_crop_enabled = crop_manuscript_area
 
     app = FastAPI(
         title="msocr Annotation API",
@@ -203,11 +211,23 @@ def create_app(base_dir: Optional[Path] = None) -> FastAPI:
                     status_code=422,
                     detail="Browser upload sessions require a multipart file field such as 'file' or 'image'.",
                 )
-            populated = manager.populate_session(session.session_id, image_bytes=image_bytes)
+            populated = manager.populate_session(
+                session.session_id,
+                image_bytes=image_bytes,
+                crop_manuscript_area=app_crop_enabled and session_request.crop_manuscript_area,
+            )
         elif ingestion == IngestionPath.LOCAL_FILE:
-            populated = manager.populate_session(session.session_id, image_source=Path(source))
+            populated = manager.populate_session(
+                session.session_id,
+                image_source=Path(source),
+                crop_manuscript_area=app_crop_enabled and session_request.crop_manuscript_area,
+            )
         else:
-            populated = manager.populate_session(session.session_id, iiif_manifest_url=source)
+            populated = manager.populate_session(
+                session.session_id,
+                iiif_manifest_url=source,
+                crop_manuscript_area=app_crop_enabled and session_request.crop_manuscript_area,
+            )
 
         if populated is None:
             raise HTTPException(status_code=500, detail="Failed to populate annotation session")

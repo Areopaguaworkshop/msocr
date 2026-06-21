@@ -101,6 +101,7 @@ class AnnotationSession:
     source: str = ""
     page_count: int = 1
     needs_manual_review: bool = False
+    crop_offset: Tuple[int, int] = (0, 0)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
@@ -133,6 +134,7 @@ class AnnotationSession:
             "source": self.source,
             "page_count": self.page_count,
             "needs_manual_review": self.needs_manual_review,
+            "crop_offset": list(self.crop_offset),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -151,6 +153,7 @@ class AnnotationSession:
             source=data.get("source", ""),
             page_count=data.get("page_count", 1),
             needs_manual_review=data.get("needs_manual_review", False),
+            crop_offset=tuple(data.get("crop_offset", (0, 0))),
             created_at=data.get("created_at", datetime.now().isoformat()),
             updated_at=data.get("updated_at", datetime.now().isoformat()),
         )
@@ -243,6 +246,7 @@ class SessionManager:
         image_source: Optional[Path] = None,
         image_bytes: Optional[bytes] = None,
         iiif_manifest_url: Optional[str] = None,
+        crop_manuscript_area: bool = True,
     ) -> Optional[AnnotationSession]:
         """Materialize a session's source page, segmentation, and line crops."""
         session = self.get_session(session_id)
@@ -255,7 +259,9 @@ class SessionManager:
             image_bytes=image_bytes,
             iiif_manifest_url=iiif_manifest_url,
         )
-        segmentation_engine, lines = self._segment_page_into_lines(session, page_path)
+        segmentation_engine, lines = self._segment_page_into_lines(
+            session, page_path, crop_manuscript_area=crop_manuscript_area
+        )
 
         session.page_count = page_count
         session.segmentation_engine = segmentation_engine
@@ -471,11 +477,32 @@ class SessionManager:
         raise ValueError("Could not extract an image URL from IIIF manifest")
 
     def _segment_page_into_lines(
-        self, session: AnnotationSession, page_path: Path
+        self, session: AnnotationSession, page_path: Path,
+        crop_manuscript_area: bool = True,
     ) -> Tuple[SegmentationEngine, List[LineSegment]]:
         with Image.open(page_path) as img:
             working_image = img.convert("L")
+
+            # ponytail: union bbox of all ink components above a min area, padded.
+            # No density-based filtering, no header/footer heuristics — add those
+            # if marginal noise is common. On any failure, pass through unchanged.
+            crop_offset = (0, 0)
+            if crop_manuscript_area:
+                from msocr.segmentation.manuscript_area import (
+                    detect_manuscript_area,
+                    crop_to_manuscript_area,
+                )
+                try:
+                    roi = detect_manuscript_area(working_image)
+                    working_image, off_x, off_y = crop_to_manuscript_area(working_image, roi)
+                    crop_offset = (off_x, off_y)
+                except Exception as exc:
+                    logger.warning(
+                        "manuscript area detection failed for session %s: %s",
+                        session.session_id, exc,
+                    )
             width, height = working_image.size
+            session.crop_offset = crop_offset
 
             try:
                 blla_seg = self._run_blla_segmentation(working_image, session.language)
@@ -514,9 +541,12 @@ class SessionManager:
         )
 
     def _run_blla_segmentation(self, image: Image.Image, language: str):
-        from kraken.blla import segment
+        from kraken.tasks import SegmentationTaskModel
+        from kraken.configs import SegmentationInferenceConfig
 
-        return segment(image, text_direction=self._text_direction(language), raise_on_error=True)
+        seg_model = SegmentationTaskModel.load_model()
+        config = SegmentationInferenceConfig(text_direction=self._text_direction(language))
+        return seg_model.predict(image, config)
 
     def _run_pageseg_segmentation(self, image: Image.Image, language: str):
         from kraken.pageseg import segment
@@ -650,6 +680,9 @@ class SessionManager:
         page.set("PHYSICAL_IMG_NR", "1")
         
         print_space = ET.SubElement(page, "PrintSpace")
+
+        # Map line coords back from cropped-page space to original page space.
+        off_x, off_y = session.crop_offset
         
         # Process lines
         for line in session.lines:
@@ -664,10 +697,10 @@ class SessionManager:
             
             # Get coordinates
             if line.boundary_points:
-                min_x = min(p[0] for p in line.boundary_points)
-                max_x = max(p[0] for p in line.boundary_points)
-                min_y = min(p[1] for p in line.boundary_points)
-                max_y = max(p[1] for p in line.boundary_points)
+                min_x = min(p[0] for p in line.boundary_points) + off_x
+                max_x = max(p[0] for p in line.boundary_points) + off_x
+                min_y = min(p[1] for p in line.boundary_points) + off_y
+                max_y = max(p[1] for p in line.boundary_points) + off_y
                 width = max_x - min_x
                 height = max_y - min_y
             else:
@@ -693,7 +726,7 @@ class SessionManager:
             
             # Add baseline if available
             if line.baseline_points:
-                baseline_str = " ".join(f"{x},{y}" for x, y in line.baseline_points)
+                baseline_str = " ".join(f"{x + off_x},{y + off_y}" for x, y in line.baseline_points)
                 baseline = ET.SubElement(textline, "Baseline")
                 baseline.set("POINTS", baseline_str)
             
@@ -725,6 +758,7 @@ class SessionManager:
         page.set("imageFilename", session.source)
         
         # Process lines
+        off_x, off_y = session.crop_offset
         for line in session.lines:
             line_id = line.line_id
             annotation = session.annotations.get(line_id, {})
@@ -749,13 +783,13 @@ class SessionManager:
             # Coords
             if line.boundary_points:
                 coords = ET.SubElement(textline, "Coords")
-                points_str = " ".join(f"{x},{y}" for x, y in line.boundary_points)
+                points_str = " ".join(f"{x + off_x},{y + off_y}" for x, y in line.boundary_points)
                 coords.set("points", points_str)
             
             # Baseline
             if line.baseline_points:
                 baseline = ET.SubElement(textline, "Baseline")
-                points_str = " ".join(f"{x},{y}" for x, y in line.baseline_points)
+                points_str = " ".join(f"{x + off_x},{y + off_y}" for x, y in line.baseline_points)
                 baseline.set("points", points_str)
             
             # TextEquiv

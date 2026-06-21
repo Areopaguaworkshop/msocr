@@ -335,7 +335,7 @@ def serve_api(host, port, reload) -> None:
 
 @main.command(name="annotation-api")
 @click.option("--host", default="0.0.0.0", show_default=True, help="Bind host")
-@click.option("--port", default=8001, show_default=True, type=int, help="Bind port")
+@click.option("--port", default="8001", show_default=True, type=int, help="Bind port")
 @click.option(
     "--base-dir",
     type=click.Path(path_type=Path),
@@ -343,13 +343,19 @@ def serve_api(host, port, reload) -> None:
     show_default=True,
     help="Base directory for persisted annotation sessions",
 )
-def serve_annotation_api(host, port, base_dir) -> None:
+@click.option(
+    "--no-crop-manuscript-area",
+    is_flag=True,
+    default=False,
+    help="Disable auto-detection and cropping of manuscript area before line segmentation",
+)
+def serve_annotation_api(host, port, base_dir, no_crop_manuscript_area) -> None:
     """Run the dedicated annotation FastAPI service."""
     import uvicorn
 
     from msocr.service.annotation_api import create_app
 
-    app = create_app(base_dir=base_dir)
+    app = create_app(base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area)
     uvicorn.run(app, host=host, port=port)
 
 
@@ -544,11 +550,17 @@ def evaluate(manifest, style_group, model, reports_dir) -> None:
 
 @main.command(name="annotate")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
-@click.option("--port", default=8001, show_default=True, type=int, help="Bind port")
+@click.option("--port", default="8001", show_default=True, type=int, help="Bind port")
 @click.option("--base-dir", default=".", show_default=True,
               type=click.Path(path_type=Path),
               help="Base directory for persisted annotation sessions")
-def annotate(host, port, base_dir) -> None:
+@click.option(
+    "--no-crop-manuscript-area",
+    is_flag=True,
+    default=False,
+    help="Disable auto-detection and cropping of manuscript area before line segmentation",
+)
+def annotate(host, port, base_dir, no_crop_manuscript_area) -> None:
     """Run the annotation API and print the /ui URL.
 
     ponytail: prints the URL instead of auto-opening a browser — `webbrowser`
@@ -558,7 +570,7 @@ def annotate(host, port, base_dir) -> None:
 
     from msocr.service.annotation_api import create_app
 
-    app = create_app(base_dir=base_dir)
+    app = create_app(base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area)
     sessions = sorted((base_dir / "sessions").glob("*/session.json"))
     suffix = f"/ui/{sessions[0].parent.name}" if sessions else "/ui/{session_id}"
     click.echo(f"Annotation UI: http://{host}:{port}{suffix}")
