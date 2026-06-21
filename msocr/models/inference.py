@@ -151,43 +151,7 @@ class OCRModel:
 
     def predict_page(self, image_path: Path) -> Dict[str, Any]:
         """Predict text from a full page image with line segmentation."""
-        if not self.model:
-            raise RuntimeError("Model not loaded")
-
-        try:
-            # Preprocess image
-            processed_img = self.preprocess_image(image_path)
-
-            # Perform line segmentation using Kraken's blla
-            lines = segment(processed_img, text_direction="horizontal-rl", device=self.device)
-
-            # Process each line
-            all_predictions = []
-            for line_img in lines:
-                # Extract line region
-                # Note: This is a simplified approach
-                # In practice, you'd need proper line extraction
-
-                # For now, return the segmented lines count
-                all_predictions.append(
-                    {"line_number": len(all_predictions) + 1, "status": "segmented"}
-                )
-
-            return {
-                "image_path": str(image_path),
-                "lines_found": len(lines),
-                "predictions": all_predictions,
-                "note": "Full page processing requires additional implementation",
-            }
-
-        except Exception as e:
-            logger.error(f"Error processing page {image_path}: {e}")
-            return {
-                "image_path": str(image_path),
-                "lines_found": 0,
-                "predictions": [],
-                "error": str(e),
-            }
+        return self.predict_line(image_path, segmentation_type="baseline")
 
 
 def predict(image_path: str, model_path: str, device: str = "cpu", segmentation_type: str = "baseline") -> str:

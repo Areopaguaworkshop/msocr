@@ -29,6 +29,8 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
     """walk_style_group builds the 7.0 ketos train command, uploads .arrow,
     runs training, then runs eval on the downloaded model."""
     manifest_path = _make_manifest(tmp_path)
+    base_model = tmp_path / "base.safetensors"
+    base_model.write_bytes(b"base")
 
     fake_runner = MagicMock()
     # run_training returns the artifact_local_path it was given.
@@ -54,7 +56,7 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
             manifest_path=str(manifest_path),
             style_group_id="g1",
             runner=fake_runner,
-            base_model_path="/tmp/base.safetensors",
+            base_model_path=str(base_model),
             output_model_path="/tmp/out.safetensors",
             reports_dir="/tmp/reports",
         )
@@ -65,7 +67,7 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
     train_cmd = kwargs["train_cmd"]
     assert train_cmd[:7] == [
         "ketos", "-d", "cuda:0", "--workers", "8", "train",
-        "--load", "/tmp/base.safetensors",
+        "--load", "/workspace/base.safetensors",
     ][:7]
     assert "--resize" in train_cmd
     assert "--augment" in train_cmd
@@ -77,6 +79,7 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
     assert uploads == [
         (str(tmp_path / "train.arrow"), "/workspace/train.arrow"),
         (str(tmp_path / "val.arrow"), "/workspace/val.arrow"),
+        (str(base_model), "/workspace/base.safetensors"),
     ]
 
     # run_evaluation called once with the downloaded model path + style_group.
@@ -85,3 +88,29 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
     assert eval_kwargs["model_path"] == "/tmp/out.safetensors"
     assert eval_kwargs["style_group_id"] == "g1"
     assert report == fake_report
+
+
+def test_walk_style_group_respects_no_augment(tmp_path):
+    """--no-augment should remove --augment from the pod-side ketos command."""
+    manifest_path = _make_manifest(tmp_path)
+    base_model = tmp_path / "base.safetensors"
+    base_model.write_bytes(b"base")
+    fake_runner = MagicMock()
+
+    def fake_compile(self, xmls):
+        return str(tmp_path / f"{__import__('pathlib').Path(xmls[0]).stem}.arrow")
+
+    with patch("msocr.training.orchestrator.KetosTrainer.compile_dataset", fake_compile), \
+         patch("msocr.training.orchestrator.run_evaluation", return_value={}):
+        walk_style_group(
+            manifest_path=str(manifest_path),
+            style_group_id="g1",
+            runner=fake_runner,
+            base_model_path=str(base_model),
+            output_model_path="/tmp/out.safetensors",
+            reports_dir="/tmp/reports",
+            augment=False,
+        )
+
+    _, kwargs = fake_runner.run_training.call_args
+    assert "--augment" not in kwargs["train_cmd"]

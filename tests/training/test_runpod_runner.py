@@ -115,3 +115,60 @@ def test_upload_artifact_does_not_terminate_pod_on_failure(monkeypatch):
         runner.upload_artifact(local="/tmp/train.arrow", pod_ip="1.2.3.4",
                                remote="/workspace/train.arrow")
     fake_runpod.terminate_pod.assert_not_called()  # key assertion
+
+
+def test_run_training_ssh_execs_downloads_and_terminates_without_waiting_for_pod_exit(monkeypatch):
+    """SSH training is synchronous; the pod stays running until we download and terminate it."""
+    fake_runpod = MagicMock()
+    fake_runpod.create_pod.return_value = {"id": "pod-123"}
+    fake_runpod.get_pod.return_value = {"runtime": {"ip": "1.2.3.4"}, "status": "RUNNING"}
+    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    runner.upload_artifact = MagicMock()
+    runner.ssh_exec = MagicMock(return_value="ok")
+    runner.download_artifact = MagicMock()
+    runner.poll_until_done = MagicMock()
+
+    result = runner.run_training(
+        name="train",
+        train_cmd=["ketos", "train"],
+        artifact_remote_path="/workspace/models/out.safetensors",
+        artifact_local_path="/tmp/out.safetensors",
+        pre_train_upload=[("/tmp/train.arrow", "/workspace/train.arrow")],
+    )
+
+    assert result == "/tmp/out.safetensors"
+    runner.poll_until_done.assert_not_called()
+    runner.ssh_exec.assert_has_calls([
+        call("1.2.3.4", ["mkdir", "-p", "/workspace/models"]),
+        call("1.2.3.4", ["ketos", "train"], timeout=7200),
+    ])
+    runner.download_artifact.assert_called_once_with(
+        "1.2.3.4", "/workspace/models/out.safetensors", "/tmp/out.safetensors"
+    )
+    fake_runpod.terminate_pod.assert_called_once_with("pod-123")
+
+
+def test_run_training_leaves_pod_running_when_download_fails(monkeypatch):
+    """If artifact download fails after training, keep the pod alive for manual recovery."""
+    fake_runpod = MagicMock()
+    fake_runpod.create_pod.return_value = {"id": "pod-123"}
+    fake_runpod.get_pod.return_value = {"runtime": {"ip": "1.2.3.4"}, "status": "RUNNING"}
+    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    runner.ssh_exec = MagicMock(return_value="ok")
+    runner.download_artifact = MagicMock(side_effect=Exception("download fail"))
+
+    with pytest.raises(Exception, match="download fail"):
+        runner.run_training(
+            name="train",
+            train_cmd=["ketos", "train"],
+            artifact_remote_path="/workspace/models/out.safetensors",
+            artifact_local_path="/tmp/out.safetensors",
+        )
+
+    fake_runpod.terminate_pod.assert_not_called()

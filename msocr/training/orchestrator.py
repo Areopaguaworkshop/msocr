@@ -39,6 +39,9 @@ def walk_style_group(
     sg = manifest.style_groups[style_group_id]
     base_override = sg.get("base_model_override")
     load_model = base_override or base_model_path
+    load_model_path = Path(load_model)
+    if not load_model_path.exists():
+        raise FileNotFoundError(f"Base model for RunPod training not found: {load_model_path}")
 
     # Compile train + val .arrow locally, then upload to the pod (Task 7.3).
     train_cases = iter_style_group_cases(manifest, style_group_id, partition="train")
@@ -56,6 +59,7 @@ def walk_style_group(
         pre_train_upload = [
             (train_arrow, "/workspace/train.arrow"),
             (val_arrow, "/workspace/val.arrow"),
+            (str(load_model_path), "/workspace/base.safetensors"),
         ]
 
         # Build the ketos train command (7.0 global flags).
@@ -63,10 +67,9 @@ def walk_style_group(
         # append that would add it twice — fixed.
         train_cmd = [
             "ketos", "-d", device, "--workers", str(workers), "train",
-            "--load", load_model,
+            "--load", "/workspace/base.safetensors",
             "--resize", "union",
             "--freeze-backbone", str(freeze_backbone),
-            "--augment",
             "--epochs", str(epochs),
             "--min-epochs", str(min_epochs),
             "--lag", str(lag),
@@ -75,6 +78,8 @@ def walk_style_group(
             "-e", "/workspace/val.arrow",
             "-o", "/workspace/models/" + style_group_id,
         ]
+        if augment:
+            train_cmd.append("--augment")
 
         runner.run_training(
             name=f"{manifest.manifest_id}-{style_group_id}",

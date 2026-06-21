@@ -82,6 +82,7 @@ class RunPodRunner:
     def download_artifact(self, pod_ip: str, remote: str, local: str) -> None:
         """SCP a file from the pod to local. Does NOT terminate the pod on failure
         (so the artifact survives for manual recovery)."""
+        Path(local).parent.mkdir(parents=True, exist_ok=True)
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(pod_ip, username=self.ssh_user,
@@ -115,11 +116,12 @@ class RunPodRunner:
                      artifact_remote_path: str, artifact_local_path: str,
                      poll_timeout: int = 7200,
                      pre_train_upload: list[tuple[str, str]] | None = None) -> str:
-        """Full lifecycle: submit → [upload] → ssh train → poll → download → terminate.
+        """Full lifecycle: submit → [upload] → ssh train → download → terminate.
         If ``pre_train_upload`` is provided, each ``(local, remote)`` pair is
         SFTP-put to the pod after submit + IP resolution and before training.
         Returns the local artifact path."""
         pod_id = self.submit_pod(name)
+        keep_pod_for_recovery = False
         try:
             # ponytail: RunPod assigns the pod an IP after boot; poll for it briefly.
             pod_ip = None
@@ -134,11 +136,12 @@ class RunPodRunner:
             if pre_train_upload:
                 for local, remote in pre_train_upload:
                     self.upload_artifact(local, pod_ip, remote)
-            self.ssh_exec(pod_ip, train_cmd)
-            exit_code = self.poll_until_done(pod_id, timeout=poll_timeout)
-            if exit_code != 0:
-                raise RuntimeError(f"training exited with code {exit_code}")
+            self.ssh_exec(pod_ip, ["mkdir", "-p", str(Path(artifact_remote_path).parent)])
+            self.ssh_exec(pod_ip, train_cmd, timeout=poll_timeout)
+            keep_pod_for_recovery = True
             self.download_artifact(pod_ip, artifact_remote_path, artifact_local_path)
+            keep_pod_for_recovery = False
             return artifact_local_path
         finally:
-            self.terminate_pod(pod_id)
+            if not keep_pod_for_recovery:
+                self.terminate_pod(pod_id)
