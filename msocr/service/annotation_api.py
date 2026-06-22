@@ -6,15 +6,17 @@ This module provides a browser-accessible API for annotation sessions.
 from __future__ import annotations
 
 import json
+import logging
+import mimetypes
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import FastAPI, HTTPException, Request, UploadFile, Request as FastAPIRequest
 from fastapi.responses import FileResponse, Response, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile as StarletteUploadFile
+
 
 from msocr.data.session_manager import (
     ExportFormat,
@@ -23,6 +25,8 @@ from msocr.data.session_manager import (
     SessionManager,
 )
 from msocr.language_registry import is_supported_language, normalize_language_code
+
+logger = logging.getLogger(__name__)
 
 _ANNOTATION_UI_DIR = Path(__file__).parent / "annotation_ui"
 _TEMPLATES_DIR = _ANNOTATION_UI_DIR / "templates"
@@ -145,6 +149,33 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
     # Mount static assets for the annotation UI (HTMX, Alpine.js, vendored).
     if _STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+    @app.get("/", response_class=HTMLResponse)
+    def index_page(request: Request) -> HTMLResponse:
+        return _templates.TemplateResponse(request, "index.html.j2", {})
+
+    @app.get("/ui/{session_id}", response_class=HTMLResponse)
+    def annotate_view(request: Request, session_id: str) -> HTMLResponse:
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        return _templates.TemplateResponse(request, "annotate.html.j2", {
+            "session_id": session_id,
+            "script_variant": session.script_variant,
+        })
+
+    @app.get("/api/sessions", response_model=List[Dict[str, Any]])
+    def list_sessions() -> List[Dict[str, Any]]:
+        return [
+            {
+                "session_id": s.session_id, "language": s.language,
+                "script_variant": s.script_variant, "source": s.source,
+                "line_count": len(s.lines), "created_at": s.created_at,
+                "updated_at": s.updated_at,
+                "has_annotations": bool(getattr(s, "annotations_v2", {})),
+            }
+            for s in manager._all_sessions()
+        ]
 
     @app.post("/api/sessions", response_model=Dict[str, Any])
     async def create_session(request: Request) -> Dict[str, Any]:
@@ -355,6 +386,111 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
 
         return FileResponse(crop_path, media_type="image/jpeg")
 
+    @app.get("/api/sessions/{session_id}/image")
+    def get_session_image(session_id: str) -> Response:
+        """Serve the source fragment image for the drawing UI.
+
+        For LOCAL_FILE sessions, serve the source path directly. For
+        BROWSER_UPLOAD sessions, serve the materialized page.tif.
+        """
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+        # ponytail: prefer the original source file for LOCAL_FILE so the UI
+        # gets the deskewed fragment the user pointed at; fall back to the
+        # materialized page.tif for uploads/IIIF.
+        candidate: Optional[Path] = None
+        if session.ingestion_path == IngestionPath.LOCAL_FILE and session.source:
+            src = Path(session.source)
+            if src.exists():
+                candidate = src
+        if candidate is None:
+            page_path = manager._get_page_image_path(session_id)
+            if page_path.exists():
+                candidate = page_path
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="No source image available for session")
+
+        media_type, _ = mimetypes.guess_type(str(candidate))
+        return FileResponse(candidate, media_type=media_type or "image/png")
+
+    @app.get("/api/sessions/{session_id}/autosuggest")
+    def autosuggest(session_id: str) -> Dict[str, Any]:
+        """Run default Kraken BLLA on the source fragment, return regions + lines.
+
+        Returns ``{"regions": [...], "lines": [...]}`` with the JSON shape the
+        drawing UI expects. On any BLLA failure, returns empty lists with 200
+        OK so the UI can start blank.
+        """
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+        image_path = manager._get_page_image_path(session_id)
+        if not image_path.exists() and session.ingestion_path == IngestionPath.LOCAL_FILE and session.source:
+            alt = Path(session.source)
+            if alt.exists():
+                image_path = alt
+        if not image_path.exists():
+            return {"regions": [], "lines": []}
+
+        try:
+            from msocr.segmentation.kraken_blla import _serialize_segmentation
+            from kraken.tasks import SegmentationTaskModel
+            from kraken.configs import SegmentationInferenceConfig
+            from PIL import Image
+
+            lang_info = LANGUAGE_REGISTRY.get(session.language, {})
+            text_direction = "horizontal-rl" if lang_info.get("direction") == "rtl" else "horizontal-lr"
+            seg_model = SegmentationTaskModel.load_model()
+            with Image.open(image_path) as img:
+                seg = seg_model.predict(img, SegmentationInferenceConfig(text_direction=text_direction))
+        except Exception as exc:
+            logger.warning("autosuggest BLLA failed for session %s: %s", session_id, exc)
+            return {"regions": [], "lines": []}
+
+        regions_out: List[Dict[str, Any]] = []
+        for rtype, region_list in (getattr(seg, "regions", None) or {}).items():
+            for idx, region in enumerate(region_list, start=1):
+                boundary = getattr(region, "boundary", None) or []
+                regions_out.append({
+                    "id": getattr(region, "id", None) or f"r{len(regions_out) + 1}",
+                    "polygon": [[int(p[0]), int(p[1])] for p in boundary],
+                    "type": rtype,
+                })
+
+        lines_out: List[Dict[str, Any]] = []
+        for idx, line in enumerate(getattr(seg, "lines", None) or [], start=1):
+            baseline = getattr(line, "baseline", None) or []
+            boundary = getattr(line, "boundary", None) or []
+            lines_out.append({
+                "id": getattr(line, "id", None) or f"l{idx}",
+                "baseline": [[int(p[0]), int(p[1])] for p in baseline],
+                "boundary": [[int(p[0]), int(p[1])] for p in boundary],
+                "type": "default",
+            })
+
+        return {"regions": regions_out, "lines": lines_out}
+
+    @app.post("/api/sessions/{session_id}/annotations")
+    async def save_annotations_v2(session_id: str, request: Request) -> Dict[str, Any]:
+        """Store v2 drawing-UI annotation state (regions + lines).
+
+        Replaces any prior v2 state. Body shape:
+        {"regions": [{"id","polygon","type"}], "lines": [{"id","baseline","type","transcript"}]}
+        """
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        body = await request.json()
+        regions = body.get("regions", []) or []
+        lines = body.get("lines", []) or []
+        updated = manager.save_annotations_v2(session_id, regions, lines)
+        if updated is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        return {"status": "ok"}
+
     @app.get("/api/languages")
     def list_languages() -> List[Dict[str, Any]]:
         """List supported languages with RTL/LTR direction and web fonts.
@@ -387,68 +523,10 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
             "plan_title": "msocr HTR Training Pipeline Design",
         })
 
-    @app.get("/ui/{session_id}/{line_n}", response_class=HTMLResponse)
-    def ui_line_view(request: Request, session_id: str, line_n: int) -> HTMLResponse:
-        """Render a single line for annotation: image + RTL textbox + palette."""
-        session = manager.get_session(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        lines = session.lines
-        if line_n < 1 or line_n > len(lines):
-            raise HTTPException(status_code=404,
-                                detail=f"Line {line_n} out of range (1..{len(lines)})")
-        line = lines[line_n - 1]
-        current_text = session.annotations.get(line.line_id, {}).get("transcript", "")
-        return _templates.TemplateResponse(request, "line.html.j2", {
-            "session_id": session_id,
-            "line_n": line_n,
-            "total_lines": len(lines),
-            "prev_line_n": max(1, line_n - 1),
-            "next_line_n": min(len(lines), line_n + 1),
-            "current_text": current_text,
-            "line_id": line.line_id,
-            "script_variant": session.script_variant,
-        })
-
-    @app.get("/ui/{session_id}", response_class=HTMLResponse)
-    def ui_session_view(request: Request, session_id: str) -> HTMLResponse:
-        """Render all line crops for one annotation session."""
-        session = manager.get_session(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        return _templates.TemplateResponse(request, "session.html.j2", {
-            "session_id": session_id,
-            "lines": [
-                {
-                    "line_id": line.line_id,
-                    "line_n": idx,
-                    "transcription": session.annotations.get(line.line_id, {}).get("transcript", ""),
-                    "skip": session.annotations.get(line.line_id, {}).get("skip", False),
-                }
-                for idx, line in enumerate(session.lines, start=1)
-            ],
-            "script_variant": session.script_variant,
-        })
-
-    @app.post("/api/sessions/{session_id}/line/{line_n}/save")
-    async def save_line_transcription(session_id: str, line_n: int, request: Request) -> Dict[str, Any]:
-        """Save a single line's transcription (HTMX form submit)."""
-        session = manager.get_session(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        lines = session.lines
-        if line_n < 1 or line_n > len(lines):
-            raise HTTPException(status_code=404, detail=f"Line {line_n} out of range")
-        line = lines[line_n - 1]
-        form = await request.form()
-        transcription = form.get("transcription", "")
-        skip = str(form.get("skip", "")).lower() in {"1", "true", "on", "yes"}
-        annotations = dict(session.annotations)
-        annotations[line.line_id] = {"transcript": str(transcription), "skip": skip}
-        updated = manager.save_annotations(session_id, annotations)
-        if updated is None:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        return {"status": "ok", "line_id": line.line_id, "line_n": line_n, "skip": skip}
-
+    # ponytail: /ui/{session_id} and /ui/{session_id}/{line_n} routes plus the
+    # per-line POST /line/{n}/save were removed — the designer lane is
+    # replacing the transcription-only UI with the Fabric.js drawing UI at the
+    # same /ui/{session_id} path. Bulk annotations now go through
+    # POST /api/sessions/{id}/annotations.
 
     return app

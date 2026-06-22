@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import click
+import numpy as np
 import yaml
+from PIL import Image
 
 from msocr.data.manifest import load_frozen_manifest
 from msocr.language_registry import (
@@ -320,6 +322,176 @@ def extract_lines(image, expected_lines, output_dir, roi, row_centers, min_compo
     click.echo(f"Extracted {len(bands)} lines to {output_dir / 'lines'}")
     click.echo(f"Overlay: {output_dir / 'line_overlay.jpg'}")
     click.echo(f"Contact sheet: {output_dir / 'line_contact_sheet.jpg'}")
+
+
+@main.command(name="isolate-fragments")
+@click.argument("image_path", type=click.Path(path_type=Path, exists=True))
+@click.option("--output-dir", default="tmp/phase1_fragments/", show_default=True,
+              type=click.Path(path_type=Path), help="Directory for outputs")
+@click.option("--sauvola-window", default=51, show_default=True, type=int,
+              help="Sauvola local threshold window size (px)")
+@click.option("--min-component-area", default=50, show_default=True, type=int,
+              help="Drop ink components below this area")
+@click.option("--min-fragment-area", default=5000, show_default=True, type=int,
+              help="Flag fragments below this total ink area as FRAGMENT_TOO_SMALL")
+@click.option("--dbscan-eps", default=150, show_default=True, type=int,
+              help="DBSCAN cluster radius in px (typical inter-fragment gap)")
+def isolate_fragments_command(image_path, output_dir, sauvola_window,
+                              min_component_area, min_fragment_area,
+                              dbscan_eps) -> None:
+    """Phase 1: isolate manuscript fragments via Sauvola + CC + DBSCAN."""
+    from msocr.segmentation.fragment_isolation import (
+        fragments_to_json,
+        isolate_fragments,
+        write_fragment_overlay,
+    )
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    crops_dir = output_dir / "fragments"
+    crops_dir.mkdir(parents=True, exist_ok=True)
+
+    image = Image.open(image_path).convert("RGB")
+    fragments = isolate_fragments(
+        image,
+        sauvola_window=sauvola_window,
+        min_component_area=min_component_area,
+        min_fragment_area=min_fragment_area,
+        dbscan_eps=dbscan_eps,
+    )
+
+    fragments_to_json(fragments, output_dir / "fragments.json")
+    write_fragment_overlay(image, fragments, output_dir / "overlay.jpg")
+
+    for frag in fragments:
+        left, top, right, bottom = frag.bbox
+        image.crop((left, top, right, bottom)).save(
+            crops_dir / f"{frag.fragment_id}.png", format="PNG"
+        )
+
+    flagged = sum(1 for f in fragments if f.flagged)
+    click.echo(
+        f"Isolated {len(fragments)} fragments to {crops_dir} "
+        f"({flagged} flagged FRAGMENT_TOO_SMALL)"
+    )
+    click.echo(f"JSON: {output_dir / 'fragments.json'}")
+    click.echo(f"Overlay: {output_dir / 'overlay.jpg'}")
+
+
+@main.command(name="binarize-fragments")
+@click.argument("image_path", type=click.Path(path_type=Path, exists=True))
+@click.option("--fragments-json", required=True,
+              type=click.Path(path_type=Path, exists=True),
+              help="Path to fragments.json from Phase 1 (isolate-fragments)")
+@click.option("--output-dir", default="tmp/phase2_binarized/", show_default=True,
+              type=click.Path(path_type=Path), help="Directory for binarized masks")
+@click.option("--sauvola-window", default=25, show_default=True, type=int,
+              help="Sauvola local threshold window size (px)")
+def binarize_fragments_command(image_path, fragments_json, output_dir,
+                               sauvola_window) -> None:
+    """Phase 2: binarize each non-flagged fragment for geometry use (deskew/CC)."""
+    from msocr.preprocessing.binarize import (
+        binarize_for_geometry,
+        has_bleed_through,
+        nlbin_binarize,
+        sauvola_binarize,
+    )
+    from msocr.segmentation.fragment_isolation import fragments_from_json
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    image = Image.open(image_path).convert("RGB")
+    fragments = fragments_from_json(Path(fragments_json))
+
+    n_total = 0
+    n_sauvola = 0
+    n_nlbin = 0
+    errors: list[str] = []
+
+    for frag in fragments:
+        if frag.flagged == "FRAGMENT_TOO_SMALL":
+            continue
+        n_total += 1
+        left, top, right, bottom = frag.bbox
+        crop = image.crop((left, top, right, bottom))
+        try:
+            used_nlbin = has_bleed_through(crop)
+            if used_nlbin:
+                mask = nlbin_binarize(crop)
+                n_nlbin += 1
+                method = "nlbin"
+            else:
+                mask = sauvola_binarize(crop, window_size=sauvola_window)
+                n_sauvola += 1
+                method = "sauvola"
+        except Exception as exc:
+            errors.append(f"{frag.fragment_id}: {exc}")
+            continue
+
+        Image.fromarray(mask, mode="L").save(
+            output_dir / f"{frag.fragment_id}_mask.png", format="PNG"
+        )
+
+        # side-by-side comparison: original crop (grayscale) | binary mask
+        crop_gray = np.array(crop.convert("L"))
+        compare = np.hstack([crop_gray, mask])
+        Image.fromarray(compare, mode="L").save(
+            output_dir / f"{frag.fragment_id}_compare.jpg", format="JPEG", quality=90
+        )
+        click.echo(f"{frag.fragment_id}: {method}")
+
+    click.echo(
+        f"Binarized {n_total} fragments to {output_dir} "
+        f"({n_nlbin} with nlbin, {n_sauvola} with sauvola)"
+    )
+    for err in errors:
+        click.echo(f"ERROR {err}", err=True)
+
+
+@main.command(name="deskew-fragments")
+@click.argument("image_path", type=click.Path(path_type=Path, exists=True))
+@click.option("--fragments-json", required=True,
+              type=click.Path(path_type=Path, exists=True),
+              help="Path to fragments.json from Phase 1 (isolate-fragments)")
+@click.option("--binarized-dir", default="tmp/phase2_binarized/", show_default=True,
+              type=click.Path(path_type=Path),
+              help="Directory containing {fragment_id}_mask.png from Phase 2")
+@click.option("--output-dir", default="tmp/phase3_deskewed/", show_default=True,
+              type=click.Path(path_type=Path), help="Directory for deskewed crops")
+def deskew_fragments_command(image_path, fragments_json, binarized_dir, output_dir) -> None:
+    """Phase 3: per-fragment Hough deskew using Phase 2 binary masks."""
+    from msocr.preprocessing.deskew import deskew_fragment
+    from msocr.segmentation.fragment_isolation import fragments_from_json
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    binarized_dir = Path(binarized_dir)
+
+    image = Image.open(image_path).convert("RGB")
+    fragments = fragments_from_json(Path(fragments_json))
+
+    angles: dict[str, float] = {}
+    for frag in fragments:
+        if frag.flagged == "FRAGMENT_TOO_SMALL":
+            continue
+        mask_path = binarized_dir / f"{frag.fragment_id}_mask.png"
+        if not mask_path.exists():
+            click.echo(f"ERROR {frag.fragment_id}: mask not found at {mask_path}", err=True)
+            continue
+        mask = np.array(Image.open(mask_path).convert("L"))
+        left, top, right, bottom = frag.bbox
+        crop = image.crop((left, top, right, bottom))
+        deskewed, angle = deskew_fragment(crop, mask)
+        deskewed.save(output_dir / f"{frag.fragment_id}_deskewed.png", format="PNG")
+        angles[frag.fragment_id] = angle
+        click.echo(f"{frag.fragment_id}: {angle:+.2f}deg")
+
+    (output_dir / "deskew_angles.json").write_text(
+        json.dumps(angles, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    angle_strs = ", ".join(f"{fid}={a:+.2f}deg" for fid, a in angles.items())
+    click.echo(f"Deskewed {len(angles)} fragments (angles: {angle_strs})")
 
 
 @main.command(name="api")

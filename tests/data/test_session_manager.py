@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from PIL import Image, ImageDraw
 import pytest
 
 from msocr.data.session_manager import (
@@ -97,6 +98,31 @@ def test_manual_segmentation_sets_review_flag(session_manager: SessionManager):
 
 def test_line_crop_bbox_is_padded_and_clamped(session_manager: SessionManager):
     assert session_manager._padded_bbox((10, 10, 50, 40), 100, 80) == (0, 2, 74, 48)
+
+
+def test_line_crops_apply_manuscript_area_offset(session_manager: SessionManager, tmp_path: Path):
+    session = session_manager.create_session(
+        language="sogdian",
+        script_variant="standard",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.tif",
+    )
+    page_path = tmp_path / "page.tif"
+    image = Image.new("RGB", (220, 180), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((105, 85, 125, 95), fill="black")
+    image.save(page_path)
+
+    lines = session_manager._write_line_crops(
+        session.session_id,
+        page_path,
+        [{"bbox": (60, 60, 90, 80), "boundary_points": None, "baseline_points": None}],
+        crop_offset=(40, 20),
+    )
+
+    crop_path = session_manager._get_session_dir(session.session_id) / lines[0].image_crop_path
+    with Image.open(crop_path) as crop:
+        assert crop.convert("L").getextrema()[0] < 80
 
 
 def test_save_page_image_from_local_file(session_manager: SessionManager, tmp_path: Path):

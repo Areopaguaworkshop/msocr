@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 from urllib.request import urlopen
 import logging
@@ -97,6 +97,10 @@ class AnnotationSession:
     segmentation_engine: SegmentationEngine
     lines: List[LineSegment] = field(default_factory=list)
     annotations: Dict[str, Dict] = field(default_factory=dict)
+    # ponytail: v2 annotation state for the drawing UI (regions + lines with
+    # SegmOnto types + transcripts). Replaces v1 `annotations` for PAGE export
+    # when present; v1 kept for backward compat with existing tests/exports.
+    annotations_v2: Dict[str, Any] = field(default_factory=dict)
     ingestion_path: IngestionPath = IngestionPath.LOCAL_FILE
     source: str = ""
     page_count: int = 1
@@ -130,6 +134,7 @@ class AnnotationSession:
             "segmentation_engine": self.segmentation_engine.value,
             "lines": [line.to_dict() for line in self.lines],
             "annotations": self.annotations,
+            "annotations_v2": self.annotations_v2,
             "ingestion_path": self.ingestion_path.value,
             "source": self.source,
             "page_count": self.page_count,
@@ -149,6 +154,7 @@ class AnnotationSession:
             segmentation_engine=SegmentationEngine(data["segmentation_engine"]),
             lines=[LineSegment.from_dict(l) for l in data.get("lines", [])],
             annotations=data.get("annotations", {}),
+            annotations_v2=data.get("annotations_v2", {}),
             ingestion_path=IngestionPath(data.get("ingestion_path", "local_file")),
             source=data.get("source", ""),
             page_count=data.get("page_count", 1),
@@ -342,6 +348,32 @@ class SessionManager:
         logger.info(f"Saved {len(annotations)} annotations for session {session_id}")
         return session
 
+    def save_annotations_v2(
+        self, session_id: str, regions: List[Dict[str, Any]], lines: List[Dict[str, Any]]
+    ) -> Optional[AnnotationSession]:
+        """Store v2 drawing-UI annotation state (regions + lines with SegmOnto types + transcripts).
+
+        Replaces any prior v2 state. v1 `annotations` dict is untouched.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        session.annotations_v2 = {"regions": regions, "lines": lines}
+        session.updated_at = datetime.now().isoformat()
+        self._save_session(session)
+        logger.info(
+            "Saved v2 annotations for session %s: %d regions, %d lines",
+            session_id, len(regions), len(lines),
+        )
+        return session
+
+    def get_annotations_v2(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Return v2 annotation state ({'regions': [...], 'lines': [...]}) or None."""
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        return session.annotations_v2
+
     def export_session(
         self, session_id: str, format: ExportFormat
     ) -> Optional[str]:
@@ -509,7 +541,7 @@ class SessionManager:
                 blla_geometries = self._segmentation_to_geometries(blla_seg)
                 if len(blla_geometries) >= 3:
                     return SegmentationEngine.BLLA, self._write_line_crops(
-                        session.session_id, page_path, blla_geometries
+                        session.session_id, page_path, blla_geometries, crop_offset=crop_offset
                     )
             except Exception as exc:
                 logger.warning("BLLA segmentation failed for session %s: %s", session.session_id, exc)
@@ -519,7 +551,7 @@ class SessionManager:
                 pageseg_geometries = self._segmentation_to_geometries(pageseg_seg)
                 if pageseg_geometries:
                     return SegmentationEngine.PAGESEG, self._write_line_crops(
-                        session.session_id, page_path, pageseg_geometries
+                        session.session_id, page_path, pageseg_geometries, crop_offset=crop_offset
                     )
             except Exception as exc:
                 logger.warning(
@@ -537,7 +569,7 @@ class SessionManager:
             "baseline_points": None,
         }
         return SegmentationEngine.MANUAL, self._write_line_crops(
-            session.session_id, page_path, [manual_geometry]
+            session.session_id, page_path, [manual_geometry], crop_offset=crop_offset
         )
 
     def _run_blla_segmentation(self, image: Image.Image, language: str):
@@ -603,6 +635,8 @@ class SessionManager:
         session_id: str,
         page_path: Path,
         geometries: List[Dict[str, object]],
+        *,
+        crop_offset: Tuple[int, int] = (0, 0),
     ) -> List[LineSegment]:
         crops_dir = self._get_crops_dir(session_id)
         for old_crop in crops_dir.glob("line_*.jpg"):
@@ -612,7 +646,8 @@ class SessionManager:
         with Image.open(page_path) as img:
             width, height = img.size
             for order, geometry in enumerate(geometries, start=1):
-                bbox = self._padded_bbox(geometry["bbox"], width, height)
+                crop_bbox = self._offset_bbox(geometry["bbox"], crop_offset)
+                bbox = self._padded_bbox(crop_bbox, width, height)
                 crop = img.crop(bbox).convert("RGB")
                 filename = f"line_{order:03d}.jpg"
                 crop_path = crops_dir / filename
@@ -628,6 +663,13 @@ class SessionManager:
                     )
                 )
         return line_segments
+
+    def _offset_bbox(
+        self, bbox: Tuple[int, int, int, int], offset: Tuple[int, int]
+    ) -> Tuple[int, int, int, int]:
+        off_x, off_y = offset
+        left, top, right, bottom = (int(v) for v in bbox)
+        return left + off_x, top + off_y, right + off_x, bottom + off_y
 
     def _clamp_bbox(
         self, bbox: Tuple[int, int, int, int], width: int, height: int
@@ -746,17 +788,27 @@ class SessionManager:
         return output.getvalue().decode("utf-8")
 
     def _export_page_xml(self, session: AnnotationSession) -> str:
-        """Export session to PAGE XML format."""
+        """Export session to PAGE XML format.
+
+        When v2 annotation state (drawing UI: regions + lines with SegmOnto
+        types + transcripts) is present, emit SegmOnto ``custom="structure {type:...;}"``
+        attributes and the v2 geometry/transcripts. Otherwise fall back to the
+        v1 per-line region flow with ``custom="language:... script:..."``.
+        """
         # Create root
         root = ET.Element("PcGts", xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15")
-        
+
         # Metadata
         metadata = ET.SubElement(root, "Metadata")
-        
+
         # Page
         page = ET.SubElement(root, "Page")
         page.set("imageFilename", session.source)
-        
+
+        if session.annotations_v2 and (session.annotations_v2.get("regions") or session.annotations_v2.get("lines")):
+            return self._export_page_xml_v2(session, root, page)
+
+        # v1 fallback (legacy per-line regions)
         # Process lines
         off_x, off_y = session.crop_offset
         for line in session.lines:
@@ -806,6 +858,66 @@ class SessionManager:
         tree.write(output, encoding="utf-8", xml_declaration=True)
         return output.getvalue().decode("utf-8")
 
+    def _export_page_xml_v2(
+        self, session: AnnotationSession, root: ET.Element, page: ET.Element
+    ) -> str:
+        """PAGE XML using v2 annotation state with SegmOnto custom attributes.
+
+        Emits regions (with their polygon Coords) and lines (with baseline +
+        boundary Coords + TextEquiv transcript). Lines are nested under the
+        first region; if no regions exist, lines attach directly to the page.
+        """
+        state = session.annotations_v2
+        regions = state.get("regions", []) or []
+        lines = state.get("lines", []) or []
+
+        def _pts_to_str(points) -> str:
+            return " ".join(f"{int(x)},{int(y)}" for x, y in points)
+
+        # ponytail: nest all lines under the first region (or page) — the
+        # drawing UI doesn't yet model line→region membership, and PAGE
+        # requires TextLine inside a TextRegion. Add per-line region refs
+        # when the UI starts tracking them.
+        parent_region = None
+        for idx, region in enumerate(regions, start=1):
+            textregion = ET.SubElement(page, "TextRegion")
+            textregion.set("id", str(region.get("id", f"r{idx}")))
+            rtype = region.get("type", "MainZone")
+            textregion.set("custom", f"structure {{type:{rtype};}}")
+            polygon = region.get("polygon") or []
+            if polygon:
+                coords = ET.SubElement(textregion, "Coords")
+                coords.set("points", _pts_to_str(polygon))
+            if parent_region is None:
+                parent_region = textregion
+
+        line_parent = parent_region if parent_region is not None else page
+
+        for idx, line in enumerate(lines, start=1):
+            textline = ET.SubElement(line_parent, "TextLine")
+            textline.set("id", str(line.get("id", f"l{idx}")))
+            ltype = line.get("type", "DefaultLine")
+            textline.set("custom", f"structure {{type:{ltype};}}")
+            boundary = line.get("boundary") or line.get("polygon")
+            if boundary:
+                coords = ET.SubElement(textline, "Coords")
+                coords.set("points", _pts_to_str(boundary))
+            baseline = line.get("baseline")
+            if baseline:
+                bl = ET.SubElement(textline, "Baseline")
+                bl.set("points", _pts_to_str(baseline))
+            transcript = line.get("transcript", "")
+            if transcript:
+                textequiv = ET.SubElement(textline, "TextEquiv")
+                unicode = ET.SubElement(textequiv, "Unicode")
+                unicode.text = transcript
+
+        tree = ET.ElementTree(root)
+        import io
+        output = io.BytesIO()
+        tree.write(output, encoding="utf-8", xml_declaration=True)
+        return output.getvalue().decode("utf-8")
+
     def _export_tsv(self, session: AnnotationSession) -> str:
         """Export session to TSV format for ketos train.
         
@@ -828,10 +940,15 @@ class SessionManager:
         
         return "\n".join(lines_output)
 
-    def list_sessions(self) -> List[str]:
-        """List all session IDs."""
-        session_dirs = [d.name for d in self.sessions_dir.iterdir() if d.is_dir()]
-        return sorted(session_dirs)
+    def _all_sessions(self) -> List[AnnotationSession]:
+        """List all sessions by walking the sessions directory."""
+        sessions = []
+        for session_dir in self.sessions_dir.iterdir():
+            if session_dir.is_dir():
+                session = self.get_session(session_dir.name)
+                if session:
+                    sessions.append(session)
+        return sorted(sessions, key=lambda s: s.updated_at, reverse=True)
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and all its files.

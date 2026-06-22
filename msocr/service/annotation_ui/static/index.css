@@ -1,0 +1,65 @@
+:root { 
+  --fg: #1f1f1f; --muted: #666; --bg: #f7f7f5; --paper: #fff; --border: #c9c9c4; --accent: #0b5cab; --ok: #1f7a3d;
+}
+body { 
+  margin: 0; color: var(--fg); background: var(--bg); 
+  font-family: "Noto Sans Sogdian", "Estrangelo Edessa", "Segoe UI", system-ui, sans-serif;
+}
+header { 
+  position: sticky; top: 0; z-index: 100; 
+  background: rgba(247, 247, 245, 0.96); border-bottom: 1px solid var(--border); 
+  padding: 0.75rem 1rem; height: 3.5rem; box-sizing: border-box;
+}
+.bar { 
+  max-width: 1200px; margin: 0 auto; display: flex; 
+  gap: 0.75rem; align-items: center; justify-content: space-between; direction: ltr; 
+}
+h1 { margin: 0; font-size: 1rem; font-weight: 650; }
+.actions { display: flex; gap: 0.5rem; align-items: center; }
+.status { font-size: 0.85rem; color: var(--muted); }
+
+main { 
+  max-width: 1200px; margin: 2rem auto; padding: 0 1rem; 
+}
+section { margin-bottom: 3rem; }
+h2 { font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
+
+.session-grid { 
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; 
+}
+.session-card { 
+  background: var(--paper); border: 1px solid var(--border); border-radius: 8px; 
+  padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; transition: box-shadow 0.2s;
+}
+.session-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.session-card img { 
+  width: 100%; height: 120px; object-fit: contain; 
+  background: #eee; border: 1px solid var(--border); border-radius: 4px; 
+}
+.session-info { font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.session-id { font-family: monospace; font-weight: 600; color: var(--accent); }
+.session-meta { color: var(--muted); }
+.session-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; }
+
+button { 
+  padding: 0.4rem 0.75rem; border: 1px solid var(--border); 
+  border-radius: 4px; background: var(--paper); color: var(--fg); 
+  cursor: pointer; font: inherit; font-size: 0.9rem;
+}
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.create-form { 
+  background: var(--paper); border: 1px solid var(--border); border-radius: 8px; 
+  padding: 1.5rem; max-width: 600px; display: flex; flex-direction: column; gap: 1rem;
+}
+.form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+.form-group label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.form-group input, .form-group select { 
+  padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px; font-family: inherit; 
+}
+.hint { font-size: 0.75rem; color: var(--muted); margin-top: 0.2rem; }
+
+.empty-state { 
+  grid-column: 1 / -1; text-align: center; padding: 3rem; 
+  color: var(--muted); font-style: italic; border: 2px dashed var(--border); border-radius: 8px;
+}

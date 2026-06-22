@@ -1,0 +1,90 @@
+[
+  {
+    "fragment_id": "frag_001",
+    "bbox": [
+      2442,
+      367,
+      2480,
+      507
+    ],
+    "area": 376,
+    "flagged": "FRAGMENT_TOO_SMALL"
+  },
+  {
+    "fragment_id": "frag_002",
+    "bbox": [
+      2070,
+      458,
+      2313,
+      552
+    ],
+    "area": 1850,
+    "flagged": "FRAGMENT_TOO_SMALL"
+  },
+  {
+    "fragment_id": "frag_003",
+    "bbox": [
+      420,
+      545,
+      475,
+      603
+    ],
+    "area": 184,
+    "flagged": "FRAGMENT_TOO_SMALL"
+  },
+  {
+    "fragment_id": "frag_004",
+    "bbox": [
+      245,
+      675,
+      2303,
+      2937
+    ],
+    "area": 601687,
+    "flagged": null
+  },
+  {
+    "fragment_id": "frag_005",
+    "bbox": [
+      0,
+      2703,
+      390,
+      3091
+    ],
+    "area": 18542,
+    "flagged": null
+  },
+  {
+    "fragment_id": "frag_006",
+    "bbox": [
+      1649,
+      3053,
+      1770,
+      3102
+    ],
+    "area": 373,
+    "flagged": "FRAGMENT_TOO_SMALL"
+  },
+  {
+    "fragment_id": "frag_007",
+    "bbox": [
+      2123,
+      3082,
+      2324,
+      3146
+    ],
+    "area": 1534,
+    "flagged": "FRAGMENT_TOO_SMALL"
+  },
+  {
+    "fragment_id": "frag_008",
+    "bbox": [
+      2445,
+      3096,
+      2480,
+      3146
+    ],
+    "area": 54,
+    "flagged": "FRAGMENT_TOO_SMALL"
+  }
+]

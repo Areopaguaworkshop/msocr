@@ -5,7 +5,6 @@ import numpy as np
 from PIL import Image
 from pathlib import Path
 from typing import Tuple, Optional
-from skimage import filters, morphology, transform, exposure
 import logging
 
 logger = logging.getLogger(__name__)

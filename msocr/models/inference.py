@@ -95,8 +95,22 @@ class OCRModel:
             width, height = processed_img.size
             
             if segmentation_type == "baseline":
+                # Pre-line-segmentation step: crop to the real manuscript block
+                # before Kraken tries to track lines. This keeps margins,
+                # headers, and footers from becoming candidate text lines.
+                try:
+                    from msocr.segmentation.manuscript_area import (
+                        crop_to_manuscript_area,
+                        detect_manuscript_area,
+                    )
+
+                    roi = detect_manuscript_area(processed_img)
+                    processed_img, _, _ = crop_to_manuscript_area(processed_img, roi)
+                except Exception as exc:
+                    logger.warning("Manuscript area detection failed for %s: %s", image_path, exc)
+
                 # Use Kraken baseline segmentation before HTR recognition.
-                # Step 1: Segment the page into lines using Kraken's blla
+                # Step 1: Segment the page into lines using Kraken's line tracker.
                 logger.info("Performing baseline segmentation on page...")
                 bounds = self._get_seg_model().predict(
                     processed_img,

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="sog" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Annotate - {{ session_id }}</title>
+  <link rel="stylesheet" href="/static/annotate.css">
+  <script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1 id="session-title">{{ session_id }} <span id="stats">· 0 regions, 0 lines</span></h1>
+      <div class="actions">
+        <span id="save-status" class="status">saved</span>
+        <button class="primary" id="btn-save">Save</button>
+        <a class="button" id="btn-export" href="/api/sessions/{{ session_id }}/export?format=page">Export PAGE XML</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-container">
+    <aside class="toolbar">
+      <div class="tool-group">
+        <label>Mode</label>
+        <div class="mode-buttons">
+          <button class="mode-btn active" data-mode="region">Region</button>
+          <button class="mode-btn" data-mode="baseline">Baseline</button>
+          <button class="mode-btn" data-mode="transcribe">Transcribe</button>
+        </div>
+      </div>
+
+      <div class="tool-group" id="type-selector-group">
+        <label id="type-label">Region Type</label>
+        <select id="segm-type">
+          <!-- Populated by JS based on mode -->
+        </select>
+      </div>
+
+      <div class="tool-group">
+        <button id="btn-delete" class="danger">Delete Selected</button>
+        <button id="btn-clear">Clear All</button>
+      </div>
+    </aside>
+
+    <main class="canvas-wrapper">
+      <canvas id="main-canvas"></canvas>
+    </main>
+
+    <aside class="transcription-panel" id="trans-panel">
+      <div class="panel-header">Transcription</div>
+      <textarea id="trans-input" dir="rtl" lang="sog" placeholder="Sogdian transcription..."></textarea>
+      <div class="palette">
+        {% set chars = [
+          '𐼰','𐼱','𐼲','𐼳','𐼴','𐼵','𐼶','𐼷','𐼸','𐼹',
+          '𐼺','𐼻','𐼼','𐼽','𐼾','𐼿','𐽀','𐽁','𐽂','𐽃','𐽄'
+        ] %}
+        {% for ch in chars %}
+          <button type="button" data-char="{{ ch }}">{{ ch }}</button>
+        {% endfor %}
+      </div>
+    </aside>
+  </div>
+
+  <script src="/static/annotate.js"></script>
+</body>
+</html>

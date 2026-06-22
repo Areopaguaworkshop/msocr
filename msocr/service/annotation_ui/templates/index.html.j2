@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="sog" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sogdian Annotation Index</title>
+  <link rel="stylesheet" href="/static/index.css">
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1>msocr Annotation</h1>
+      <div class="actions">
+        <span class="status">Ready</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="session-section">
+      <h2>Existing Sessions</h2>
+      <div id="session-list" class="session-grid">
+        <div class="empty-state">No sessions yet — create one below.</div>
+      </div>
+    </section>
+
+    <section class="create-section">
+      <h2>New Session</h2>
+      <form id="create-form" class="create-form">
+        <div class="form-group">
+          <label>Language</label>
+          <select id="lang-select" required></select>
+        </div>
+        <div class="form-group">
+          <label>Script Variant</label>
+          <input type="text" id="script-variant" value="sogdian-manuscript" required>
+        </div>
+        <div class="form-group">
+          <label>Fragment Path</label>
+          <input type="text" id="fragment-path" placeholder="/home/ajiap/project/msocr/tmp/phase3_deskewed/frag_004_deskewed.png" required>
+          <span class="hint">Absolute path to deskewed fragment PNG.</span>
+        </div>
+        <button type="submit" class="primary">Create & Open</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/static/index.js"></script>
+</body>
+</html>

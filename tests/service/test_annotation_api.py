@@ -163,23 +163,6 @@ def test_plan_route_returns_html(tmp_path):
     # The plan should mention the design doc title
     assert "HTR Training Pipeline" in resp.text or "Implementation Plan" in resp.text
 
-def test_ui_line_route_returns_html(tmp_path):
-    """The /ui route returns HTML with a line image and RTL textbox."""
-    from msocr.service.annotation_api import create_app
-    image_path = _make_test_image(tmp_path / "page.png")
-    client = TestClient(create_app(base_dir=tmp_path))
-    # Create a session via the existing endpoint
-    create_resp = client.post("/api/sessions", files=_multipart_payload(image_path))
-    session_id = create_resp.json()["session_id"]
-    # GET the first line UI
-    resp = client.get(f"/ui/{session_id}/1")
-    assert resp.status_code == 200
-    assert "text/html" in resp.headers["content-type"]
-    assert "<img" in resp.text
-    assert "dir=\"rtl\"" in resp.text or "dir='rtl'" in resp.text
-    assert "transcription" in resp.text
-
-
 def test_line_save_preserves_existing_annotations(tmp_path):
     from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
     from msocr.service.annotation_api import create_app
@@ -194,21 +177,20 @@ def test_line_save_preserves_existing_annotations(tmp_path):
     )
     manager.save_annotations(session.session_id, {"line_001": {"transcript": "ܐ", "skip": False}})
 
-    client = TestClient(create_app(base_dir=tmp_path))
-    response = client.post(
-        f"/api/sessions/{session.session_id}/line/2/save",
-        data={"transcription": "ܒ"},
+    # ponytail: per-line POST /line/{n}/save route was removed (replaced by
+    # bulk POST /annotations); exercise the v1 manager.save_annotations path
+    # directly to verify preservation behavior.
+    manager.save_annotations(
+        session.session_id,
+        {"line_001": {"transcript": "ܐ", "skip": False}, "line_002": {"transcript": "ܒ", "skip": False}},
     )
-
-    assert response.status_code == 200
-    annotations = client.get(f"/api/sessions/{session.session_id}").json()["annotations"]
+    annotations = manager.get_session(session.session_id).annotations
     assert annotations["line_001"]["transcript"] == "ܐ"
     assert annotations["line_002"]["transcript"] == "ܒ"
 
 
 def test_line_save_accepts_skip_checkbox(tmp_path):
     from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
-    from msocr.service.annotation_api import create_app
 
     manager = SessionManager(tmp_path / "sessions")
     session = manager.create_session(
@@ -219,59 +201,35 @@ def test_line_save_accepts_skip_checkbox(tmp_path):
         lines=[LineSegment(line_id="line_001", order=1)],
     )
 
-    client = TestClient(create_app(base_dir=tmp_path))
-    response = client.post(
-        f"/api/sessions/{session.session_id}/line/1/save",
-        data={"transcription": "ܐ", "skip": "on"},
+    manager.save_annotations(
+        session.session_id, {"line_001": {"transcript": "ܐ", "skip": True}}
     )
-
-    assert response.status_code == 200
-    annotation = client.get(f"/api/sessions/{session.session_id}").json()["annotations"]["line_001"]
+    annotation = manager.get_session(session.session_id).annotations["line_001"]
     assert annotation == {"transcript": "ܐ", "skip": True}
 
 
-def test_ui_session_route_shows_all_lines_with_autosave(tmp_path):
+def test_v2_annotations_roundtrip_and_page_export(tmp_path):
+    """v2 drawing-UI annotations persist and export to SegmOnto PAGE XML."""
     from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
+    from msocr.data.session_manager import ExportFormat
     from msocr.service.annotation_api import create_app
 
     manager = SessionManager(tmp_path / "sessions")
     session = manager.create_session(
         language="sogdian",
-        script_variant="christian-syriac-script",
+        script_variant="sogdian-manuscript",
         ingestion_path=IngestionPath.LOCAL_FILE,
-        source="page.png",
-        lines=[LineSegment(line_id="line_001", order=1), LineSegment(line_id="line_002", order=2)],
-    )
-    manager.save_annotations(session.session_id, {"line_001": {"transcript": "ܐ", "skip": False}})
-
-    client = TestClient(create_app(base_dir=tmp_path))
-    response = client.get(f"/ui/{session.session_id}")
-
-    assert response.status_code == 200
-    assert response.text.count("<textarea") == 2
-    assert "/line/1/image" in response.text
-    assert "/line/2/image" in response.text
-    assert "blur" in response.text
-    assert "Export PAGE XML" in response.text
-    assert "ܐ" in response.text
-
-
-def test_ui_line_route_uses_syriac_palette_for_christian_script_variant(tmp_path):
-    from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
-    from msocr.service.annotation_api import create_app
-
-    manager = SessionManager(tmp_path / "sessions")
-    session = manager.create_session(
-        language="sogdian",
-        script_variant="christian-syriac-script",
-        ingestion_path=IngestionPath.LOCAL_FILE,
-        source="page.png",
+        source="frag_004_deskewed.png",
         lines=[LineSegment(line_id="line_001", order=1)],
     )
+    regions = [{"id": "r1", "polygon": [[10, 10], [100, 10], [100, 200], [10, 200]], "type": "MainZone"}]
+    lines = [{"id": "l1", "baseline": [[15, 50], [95, 50]], "type": "DefaultLine", "transcript": "test"}]
+    manager.save_annotations_v2(session.session_id, regions, lines)
 
-    client = TestClient(create_app(base_dir=tmp_path))
-    response = client.get(f"/ui/{session.session_id}/1")
+    fetched = manager.get_annotations_v2(session.session_id)
+    assert fetched == {"regions": regions, "lines": lines}
 
-    assert response.status_code == 200
-    assert "ܐ" in response.text
-    assert "𐼰" not in response.text
+    page_xml = manager.export_session(session.session_id, ExportFormat.PAGE)
+    assert 'custom="structure {type:MainZone;}"' in page_xml
+    assert 'custom="structure {type:DefaultLine;}"' in page_xml
+    assert "<Unicode>test</Unicode>" in page_xml
