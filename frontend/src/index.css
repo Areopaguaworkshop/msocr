@@ -45,6 +45,10 @@ body {
 .draft-line {
   pointer-events: none;
 }
+.vertex-handle {
+  pointer-events: auto;
+  touch-action: none;
+}
 
 /* 3-second auto-fade hover tooltip. Pure CSS, no JS state.
    ponytail: ::after reads data-hint attr, animation fades out by 3s and

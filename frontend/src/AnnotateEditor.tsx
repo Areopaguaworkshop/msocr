@@ -108,6 +108,9 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   const [lineType, setLineType] = useState<LineType>("DefaultLine");
   const [regions, setRegions] = useState<Region[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
+  // ponytail: per-vertex drag for the selected region — nudge nodes instead of redraw.
+  // ceiling: fine for the common "small adjust" case; no edge-midpoint insert yet.
+  const [dragVertex, setDragVertex] = useState<{ regionId: string; index: number } | null>(null);
   const [draftPoints, setDraftPoints] = useState<Point[]>([]);
   const [selected, setSelected] = useState<Selection>(null);
   const [status, setStatus] = useState("loading");
@@ -235,6 +238,42 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     const ip = viewer.world.getItemAt(0).viewerElementToImageCoordinates(vp);
     return [Math.round(ip.x), Math.round(ip.y)];
   }, []);
+
+  // ponytail: live vertex drag on the selected region. pointer events on the
+  // whole svg would steal from pan-zoom, so we capture on the handle only.
+  const onVertexPointerDown = useCallback(
+    (e: React.PointerEvent, regionId: string, index: number) => {
+      if (mode !== "region") return;
+      e.stopPropagation();
+      e.preventDefault();
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      setDragVertex({ regionId, index });
+    },
+    [mode],
+  );
+  const onVertexPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragVertex) return;
+      e.preventDefault();
+      const point = screenToImage(e as unknown as React.MouseEvent);
+      if (!point) return;
+      setRegions((items) =>
+        items.map((r) => {
+          if (r.id !== dragVertex.regionId) return r;
+          const polygon = r.polygon.slice();
+          polygon[dragVertex.index] = point;
+          return { ...r, polygon };
+        }),
+      );
+    },
+    [dragVertex, screenToImage],
+  );
+  const onVertexPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!dragVertex) return;
+    (e.target as Element).releasePointerCapture?.(e.pointerId);
+    setDragVertex(null);
+    markDirty();
+  }, [dragVertex, markDirty]);
 
   // 2-click baseline (eScriptorium pattern)
   const handleOverlayClick = useCallback(
@@ -634,6 +673,34 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
           >
             {regions.map((r) => renderShape("region", r))}
             {lines.map((l) => renderShape("line", l))}
+            {/* ponytail: vertex handles for the selected region in Region mode —
+                drag to nudge nodes; no insert/delete-vertex yet (YAGNI for small fixes). */}
+            {mode === "region" && selected?.kind === "region" && (() => {
+              const r = regions.find((x) => x.id === selected.id);
+              if (!r) return null;
+              return r.polygon.map((p, i) => {
+                const sp = imageToScreen(p);
+                if (!sp) return null;
+                return (
+                  <circle
+                    key={`v:${r.id}:${i}`}
+                    data-shape="true"
+                    className="vertex-handle"
+                    cx={sp[0]}
+                    cy={sp[1]}
+                    r={6}
+                    fill="#fff"
+                    stroke={REGION_COLORS[r.type]}
+                    strokeWidth={2}
+                    style={{ cursor: dragVertex?.index === i ? "grabbing" : "grab" }}
+                    onPointerDown={(e) => onVertexPointerDown(e, r.id, i)}
+                    onPointerMove={onVertexPointerMove}
+                    onPointerUp={onVertexPointerUp}
+                    onPointerCancel={onVertexPointerUp}
+                  />
+                );
+              });
+            })()}
             {mode === "region" && draftScreenPoints.length > 1 && (
               <polyline
                 className="draft-line"
