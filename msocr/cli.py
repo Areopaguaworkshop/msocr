@@ -527,19 +527,40 @@ def serve_annotation_api(host, port, base_dir, no_crop_manuscript_area) -> None:
 
     from msocr.service.annotation_api import create_app
 
+    dist_path = Path("frontend/dist/index.html")
+    if not dist_path.exists():
+        raise click.ClickException(
+            "Annotation UI not built. Run: cd frontend && npm install && npm run build"
+        )
+
     app = create_app(base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area)
     uvicorn.run(app, host=host, port=port)
 
 
 @main.command(name="demo")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
-@click.option("--port", default=7860, show_default=True, type=int, help="Bind port")
-@click.option("--share", is_flag=True, help="Enable Gradio public sharing link")
-def demo_gradio(host, port, share) -> None:
-    """Run the Sogdian manuscript HTR demo."""
-    from msocr.service.deploy import run_demo_server
+@click.option("--port", default="8001", show_default=True, type=int, help="Bind port")
+@click.option("--share", is_flag=True, default=False, help="No-op (Gradio share removed)")
+def demo_react(host, port, share) -> None:
+    """Run the annotation UI (annotation API + React SPA)."""
+    import uvicorn
 
-    run_demo_server(host=host, port=port, share=share)
+    # ponytail: demo now launches the annotation API + SPA. Gradio demo is
+    # dead code kept as legacy; --share is a no-op since Gradio is gone.
+    if share:
+        click.echo("warning: --share is no longer supported; ignoring.")
+
+    dist_path = Path("frontend/dist/index.html")
+    if not dist_path.exists():
+        raise click.ClickException(
+            "Annotation UI not built. Run: cd frontend && npm install && npm run build"
+        )
+
+    from msocr.service.annotation_api import create_app
+
+    click.echo(f"Serving msocr annotation UI at http://{host}:{port}/")
+    app = create_app(crop_manuscript_area=True)
+    uvicorn.run(app, host=host, port=port)
 
 
 @main.command(name="runtime-smoke-check")
@@ -741,6 +762,12 @@ def annotate(host, port, base_dir, no_crop_manuscript_area) -> None:
     import uvicorn
 
     from msocr.service.annotation_api import create_app
+
+    dist_path = Path("frontend/dist/index.html")
+    if not dist_path.exists():
+        raise click.ClickException(
+            "Annotation UI not built. Run: cd frontend && npm install && npm run build"
+        )
 
     app = create_app(base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area)
     sessions = sorted((base_dir / "sessions").glob("*/session.json"))

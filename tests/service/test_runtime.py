@@ -50,14 +50,25 @@ def test_run_htr_service_uses_kraken_model(monkeypatch, tmp_path: Path):
 
     observed = {}
 
-    def fake_predict(image_path_arg, model_path_arg, device="cpu", segmentation_type="baseline"):
-        observed["image"] = image_path_arg
-        observed["model"] = model_path_arg
-        observed["device"] = device
-        observed["segmentation_type"] = segmentation_type
-        return "𐼷𐼹𐼻"
+    class FakeOCRModel:
+        def __init__(self, mp):
+            observed["model"] = str(mp)
 
-    monkeypatch.setattr("msocr.service.runtime.predict", fake_predict)
+        def set_device(self, device):
+            observed["device"] = device
+
+        def predict_line(self, image_path_arg, segmentation_type="baseline"):
+            observed["image"] = str(image_path_arg)
+            observed["segmentation_type"] = segmentation_type
+            return {
+                "image_path": str(image_path_arg),
+                "predictions": [
+                    {"text": "𐼷𐼹𐼻", "confidence": 0.97, "bounding_box": [10, 20, 100, 30]},
+                ],
+                "full_text": "𐼷𐼹𐼻",
+            }
+
+    monkeypatch.setattr("msocr.service.runtime.OCRModel", FakeOCRModel)
 
     result = run_htr_service(
         lang="old_sogdian",
@@ -77,3 +88,6 @@ def test_run_htr_service_uses_kraken_model(monkeypatch, tmp_path: Path):
     assert result["engine"] == "kraken"
     assert result["language"] == "sogdian"
     assert result["writing_mode"] == "handwritten"
+    assert result["lines"] == [
+        {"text": "𐼷𐼹𐼻", "confidence": 0.97, "bounding_box": [10, 20, 100, 30]},
+    ]

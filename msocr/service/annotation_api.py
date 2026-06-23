@@ -1,6 +1,7 @@
 """Annotation API FastAPI service for ground truth collection.
 
-This module provides a browser-accessible API for annotation sessions.
+This module provides a browser-accessible API for annotation sessions, plus
+serves the React SPA (``frontend/dist/``) for the annotation UI.
 """
 
 from __future__ import annotations
@@ -9,10 +10,10 @@ import json
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from fastapi import FastAPI, HTTPException, Request, UploadFile, Request as FastAPIRequest
+from typing import Any, Dict, List, Optional
+from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -28,10 +29,22 @@ from msocr.language_registry import is_supported_language, normalize_language_co
 
 logger = logging.getLogger(__name__)
 
-_ANNOTATION_UI_DIR = Path(__file__).parent / "annotation_ui"
-_TEMPLATES_DIR = _ANNOTATION_UI_DIR / "templates"
-_STATIC_DIR = _ANNOTATION_UI_DIR / "static"
-_templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+# ponytail: SPA bundle lives outside the package (designer owns frontend/).
+# Relative to cwd at app startup — mirrors the api.py / demo conventions.
+_FRONTEND_DIST = Path("frontend/dist")
+_FRONTEND_INDEX = _FRONTEND_DIST / "index.html"
+
+
+def _spa_index() -> HTMLResponse:
+    """Serve the SPA shell, or 503 with build instructions if dist is missing."""
+    if not _FRONTEND_INDEX.exists():
+        return HTMLResponse(
+            "<h1>Annotation UI not built</h1>"
+            "<p>Build the frontend:</p>"
+            "<pre>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</pre>",
+            status_code=503,
+        )
+    return FileResponse(_FRONTEND_INDEX, media_type="text/html")
 
 
 # Pydantic request models
@@ -112,6 +125,7 @@ def _serialize_session(session) -> Dict[str, Any]:
         "web_font": lang_info.get("web_font", "system-ui"),
         "needs_manual_review": session.needs_manual_review,
         "annotations": session.annotations,
+        "annotations_v2": session.annotations_v2,
         "source": session.source,
         "lines": [line.to_dict() for line in session.lines],
         "created_at": session.created_at,
@@ -146,23 +160,13 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
         description="API for ground truth collection and annotation",
     )
 
-    # Mount static assets for the annotation UI (HTMX, Alpine.js, vendored).
-    if _STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
-
-    @app.get("/", response_class=HTMLResponse)
-    def index_page(request: Request) -> HTMLResponse:
-        return _templates.TemplateResponse(request, "index.html.j2", {})
-
-    @app.get("/ui/{session_id}", response_class=HTMLResponse)
-    def annotate_view(request: Request, session_id: str) -> HTMLResponse:
-        session = manager.get_session(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        return _templates.TemplateResponse(request, "annotate.html.j2", {
-            "session_id": session_id,
-            "script_variant": session.script_variant,
-        })
+    # ponytail: CORS for Vite dev server only; broaden if other frontends appear
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/api/sessions", response_model=List[Dict[str, Any]])
     def list_sessions() -> List[Dict[str, Any]]:
@@ -473,6 +477,15 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
 
         return {"regions": regions_out, "lines": lines_out}
 
+    @app.get("/api/sessions/{session_id}/annotations")
+    def get_annotations_v2(session_id: str) -> Dict[str, Any]:
+        """Return saved v2 drawing-UI annotation state."""
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        state = session.annotations_v2 or {"regions": [], "lines": []}
+        return {"has_annotations": bool(session.annotations_v2), **state}
+
     @app.post("/api/sessions/{session_id}/annotations")
     async def save_annotations_v2(session_id: str, request: Request) -> Dict[str, Any]:
         """Store v2 drawing-UI annotation state (regions + lines).
@@ -494,7 +507,7 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
     @app.get("/api/languages")
     def list_languages() -> List[Dict[str, Any]]:
         """List supported languages with RTL/LTR direction and web fonts.
-    
+
         Returns:
             List of language metadata
         """
@@ -509,24 +522,21 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
             )
         return languages
 
-    @app.get("/plan", response_class=HTMLResponse)
-    def plan_page(request: Request) -> HTMLResponse:
-        """Render the design + implementation plan as HTML."""
-        plan_md = Path(__file__).resolve().parents[2] / "docs" / "plans" / "2026-06-17-msocr-training-pipeline-design.md"
-        try:
-            import markdown
-            html_body = markdown.markdown(plan_md.read_text(encoding="utf-8"))
-        except (ImportError, FileNotFoundError):
-            html_body = f"<pre>{plan_md.read_text(encoding='utf-8') if plan_md.exists() else 'plan not found'}</pre>"
-        return _templates.TemplateResponse(request, "plan.html.j2", {
-            "plan_html": html_body,
-            "plan_title": "msocr HTR Training Pipeline Design",
-        })
+    # ponytail: SPA serving. /assets mounted from dist (Vite convention);
+    # catch-all registered LAST so it cannot shadow /api/* routes. The React
+    # router owns client-side routes like /ui/{session_id}. If the frontend
+    # bundle is missing, the catch-all returns 503 with build instructions so
+    # API clients still get clean responses.
+    if (_FRONTEND_DIST / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
 
-    # ponytail: /ui/{session_id} and /ui/{session_id}/{line_n} routes plus the
-    # per-line POST /line/{n}/save were removed — the designer lane is
-    # replacing the transcription-only UI with the Fabric.js drawing UI at the
-    # same /ui/{session_id} path. Bulk annotations now go through
-    # POST /api/sessions/{id}/annotations.
+    @app.get("/{full_path:path}", response_class=HTMLResponse)
+    def spa_catch_all(full_path: str) -> HTMLResponse:
+        # Serve a real file from the dist root if it exists (favicon, etc.).
+        candidate = _FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            media_type, _ = mimetypes.guess_type(str(candidate))
+            return FileResponse(candidate, media_type=media_type or "application/octet-stream")
+        return _spa_index()
 
     return app

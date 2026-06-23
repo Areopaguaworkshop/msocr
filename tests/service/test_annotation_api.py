@@ -153,16 +153,6 @@ def test_line_image_endpoint_returns_crop(tmp_path: Path):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
 
-def test_plan_route_returns_html(tmp_path):
-    from msocr.service.annotation_api import create_app
-    app = create_app(base_dir=tmp_path)
-    client = TestClient(app)
-    resp = client.get("/plan")
-    assert resp.status_code == 200
-    assert "text/html" in resp.headers["content-type"]
-    # The plan should mention the design doc title
-    assert "HTR Training Pipeline" in resp.text or "Implementation Plan" in resp.text
-
 def test_line_save_preserves_existing_annotations(tmp_path):
     from msocr.data.session_manager import IngestionPath, LineSegment, SessionManager
     from msocr.service.annotation_api import create_app

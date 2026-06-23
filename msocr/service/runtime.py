@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from msocr.language_registry import normalize_language_code
-from msocr.models.inference import predict
+from msocr.models.inference import OCRModel
 
 
 DEFAULT_HTR_MODELS: dict[str, Path] = {
@@ -93,9 +93,29 @@ def run_htr_service(
     if not model_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
-    text = predict(str(image_path), str(model_path), device=device)
+    ocr_model = OCRModel(model_path)
+    ocr_model.set_device(device)
+    line_result = ocr_model.predict_line(image_path, segmentation_type="baseline")
+
+    predictions = line_result.get("predictions", [])
+    lines: list[Dict[str, Any]] = []
+    for pred in predictions:
+        bbox = pred.get("bounding_box")
+        # ponytail: bbox may be a tuple/list [x,y,w,h] from Kraken, or None
+        bounding_box = list(bbox) if bbox is not None else None
+        lines.append(
+            {
+                "text": pred.get("text", ""),
+                "confidence": pred.get("confidence", 1.0),
+                "bounding_box": bounding_box,
+            }
+        )
+
+    text = line_result.get("full_text", "")
     return {
+        "ok": True,
         "text": text,
+        "lines": lines,
         "engine": "kraken",
         "mode": "htr",
         "writing_mode": "handwritten",

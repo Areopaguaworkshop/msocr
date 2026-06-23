@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -18,6 +19,14 @@ app = FastAPI(
     title="msocr Sogdian HTR API",
     version="0.21.0",
     description="Local Kraken HTR backend for manuscript OCR, starting with Sogdian.",
+)
+
+# ponytail: CORS for Vite dev server only; broaden if other frontends appear
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
