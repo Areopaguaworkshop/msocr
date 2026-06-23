@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   Cursor,
+  Eraser,
   ScribbleLoop,
   TextAUnderline,
   Trash,
@@ -23,9 +24,15 @@ import type {
   RegionType,
 } from "./types";
 
+// Sims-Williams Sogdian Latin transliteration (per English-index-dictionary-sogdian.pdf,
+// right column). Includes aleph/ayin (U+02BE/02BF), Greek β γ δ θ for Sogdian extras,
+// dotted/underdotted ṭ ṣ ẓ ḥ ḣ, caron š ž č ǰ, and long vowels ā ī ū.
+// ponytail: palette mirrors the Semitic-order chart in the PDF; type freely if a char isn't here.
 const SOGDIAN_CHARS = [
-  "𐼰", "𐼱", "𐼲", "𐼳", "𐼴", "𐼵", "𐼶", "𐼷", "𐼸", "𐼹",
-  "𐼺", "𐼻", "𐼼", "𐼽", "𐼾", "𐼿", "𐽀", "𐽁", "𐽂", "𐽃", "𐽄",
+  "ʾ", "b", "g", "d", "h", "w", "z", "ḥ", "ṭ", "y", "k", "l", "m", "n",
+  "s", "ʿ", "p", "ṣ", "q", "r", "š", "t", "θ",
+  "β", "γ", "δ", "x", "č", "ž", "ẓ", "ḣ",
+  "ā", "ī", "ū", "ʾ", "ʿ",
 ];
 
 const REGION_TYPES: RegionType[] = [
@@ -299,12 +306,61 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, regions, lines, sessionId]);
 
+  // ponytail: delete is mode-scoped — Region mode touches regions only,
+  // Baseline mode touches baselines only. Prevents accidentally nuking the
+  // wrong kind when both a region and a baseline could match a click.
   function deleteSelected() {
     if (!selected) return;
-    if (selected.kind === "region") setRegions((items) => items.filter((i) => i.id !== selected.id));
-    if (selected.kind === "line") setLines((items) => items.filter((i) => i.id !== selected.id));
+    if (mode === "region" && selected.kind === "region") {
+      setRegions((items) => items.filter((i) => i.id !== selected.id));
+      setSelected(null);
+      markDirty();
+    } else if (mode === "baseline" && selected.kind === "line") {
+      setLines((items) => items.filter((i) => i.id !== selected.id));
+      setSelected(null);
+      markDirty();
+    }
+  }
+
+  function deleteAllBaselines() {
+    if (lines.length === 0) return;
+    if (!window.confirm(`Delete all ${lines.length} baselines? Regions are kept. This cannot be undone.`)) return;
+    setLines([]);
     setSelected(null);
     markDirty();
+  }
+
+  // ponytail: ray-cast midpoint of baseline against region polygon.
+  // MainZone regions from Kraken are simple rectangles, so midpoint test is sufficient;
+  // upgrade to per-vertex test if curved/concave regions become common.
+  function pointInPolygon(p: Point, polygon: Point[]): boolean {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const [xi, yi] = polygon[i], [xj, yj] = polygon[j];
+      const intersect = (yi > p[1]) !== (yj > p[1]) &&
+        p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function baselineMidpoint(line: Line): Point {
+    const pts = line.baseline;
+    if (pts.length === 0) return [NaN, NaN];
+    if (pts.length === 1) return pts[0];
+    const mid = Math.floor(pts.length / 2);
+    const a = pts[mid - 1], b = pts[mid];
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  }
+
+  function deleteBaselinesInRegion() {
+    if (!selected || selected.kind !== "region") return;
+    const region = regions.find((r) => r.id === selected.id);
+    if (!region) return;
+    const before = lines.length;
+    setLines((items) => items.filter((l) => !pointInPolygon(baselineMidpoint(l), region.polygon)));
+    const removed = before - lines.length;
+    if (removed > 0) markDirty();
   }
 
   function selectLine(id: string, focusTextarea: boolean) {
@@ -400,6 +456,13 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     const transcribed = lines.filter((l) => l.transcript.trim()).length;
     return `${transcribed}/${lines.length} lines · ${regions.length} regions`;
   }, [lines, regions]);
+
+  // ponytail: delete is mode-scoped, so the trash button is only live when
+  // the current mode matches the selected shape's kind.
+  const canDeleteSelected =
+    !!selected &&
+    ((mode === "region" && selected.kind === "region") ||
+     (mode === "baseline" && selected.kind === "line"));
 
   function renderPoints(points: Point[]): string {
     return points
@@ -516,9 +579,29 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             </button>
           ))}
           <div className="flex-1" />
+          {selected?.kind === "region" && (
+            <button
+              onClick={deleteBaselinesInRegion}
+              title="Delete all baselines inside this region"
+              className="flex items-center gap-1 px-2 h-10 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors text-xs whitespace-nowrap"
+            >
+              <Eraser size={16} />
+              <span className="hidden sm:inline">Clear baselines in region</span>
+            </button>
+          )}
+          {mode === "baseline" && lines.length > 0 && (
+            <button
+              onClick={deleteAllBaselines}
+              title="Delete every baseline on this page (regions kept)"
+              className="flex items-center gap-1 px-2 h-10 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors text-xs whitespace-nowrap"
+            >
+              <Trash size={16} />
+              <span className="hidden sm:inline">Clear all baselines</span>
+            </button>
+          )}
           <button
             onClick={deleteSelected}
-            disabled={!selected}
+            disabled={!canDeleteSelected}
             title="Delete selected (Del)"
             className="w-10 h-10 flex items-center justify-center rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
           >
@@ -641,10 +724,8 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
           <textarea
             ref={textareaRef}
-            dir="rtl"
-            lang="sog"
-            className="sogdian-text w-full p-3 text-sm leading-relaxed bg-white dark:bg-stone-900 outline-none resize-none border-b border-stone-200 dark:border-stone-800 min-h-[120px]"
-            placeholder="Select a baseline, then enter Sogdian transcription…"
+            className="w-full p-3 text-sm leading-relaxed bg-white dark:bg-stone-900 outline-none resize-none border-b border-stone-200 dark:border-stone-800 min-h-[120px] font-mono"
+            placeholder="Select a baseline, then enter Sogdian transcription (Sims-Williams Latin)…"
             value={selectedLine?.transcript ?? ""}
             disabled={!selectedLine}
             onChange={(e) => updateTranscript(e.target.value)}
@@ -662,7 +743,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                 type="button"
                 disabled={!selectedLine}
                 onClick={() => insertChar(c)}
-                className="sogdian-text w-8 h-8 text-base rounded hover:bg-stone-200 dark:hover:bg-stone-800 disabled:opacity-30"
+                className="w-8 h-8 text-base rounded hover:bg-stone-200 dark:hover:bg-stone-800 disabled:opacity-30 font-mono"
               >
                 {c}
               </button>
@@ -694,7 +775,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                     </span>
                     <span className="text-[11px] text-stone-300 cursor-grab active:cursor-grabbing group-hover:text-stone-500 ml-auto" title="drag to reorder">⠿</span>
                   </div>
-                  <div className="sogdian-text text-xs text-stone-700 dark:text-stone-300 mt-1 truncate">
+                  <div className="font-mono text-xs text-stone-700 dark:text-stone-300 mt-1 truncate text-left">
                     {line.transcript || <span className="italic text-stone-400">not transcribed</span>}
                   </div>
                 </li>
@@ -732,7 +813,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             <ol className="list-decimal pl-5 space-y-1 text-stone-700 dark:text-stone-300">
               <li><b>Regions</b> (R): enclose text areas. Click points, double-click to close. Pick the right type from the top-left palette.</li>
               <li><b>Baselines</b> (B): the reading line under each line of text. Click start, click end — that's it.</li>
-              <li><b>Transcribe</b> (T): select a baseline, type the Sogdian text in the right panel. Press <code>Enter</code> to save and jump to the next line.</li>
+              <li><b>Transcribe</b> (T): select a baseline, type the Sogdian text (Sims-Williams Latin transliteration) in the right panel. Press <code>Enter</code> to save and jump to the next line.</li>
               <li><b>Export</b>: click <i>PAGE XML</i> in the top bar to download for Kraken training.</li>
             </ol>
 
@@ -741,7 +822,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               <li><b>Navigate</b> (V) — pan and zoom the image. Hover any label for a 3-second tooltip.</li>
               <li><b>Region</b> (R) — draw region polygons. Top-left palette picks the type.</li>
               <li><b>Baseline</b> (B) — 2-click to draw a baseline. Top-left palette picks the line type.</li>
-              <li><b>Transcribe</b> (T) — type Sogdian in the right panel. Use the character palette below the textarea.</li>
+              <li><b>Transcribe</b> (T) — type the Sims-Williams Latin transliteration in the right panel. Use the character palette below the textarea for aleph, ayin, dotted/special letters.</li>
             </ul>
 
             <h3 className="font-semibold mt-4 mb-2">Region types</h3>
@@ -769,7 +850,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               <li><kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> — previous / next line</li>
               <li><kbd>↑</kbd> / <kbd>↓</kbd> (no modifier) — previous / next line</li>
               <li><kbd>Esc</kbd> — cancel current drawing</li>
-              <li><kbd>Del</kbd> / <kbd>Backspace</kbd> — delete selected region or line</li>
+              <li><kbd>Del</kbd> / <kbd>Backspace</kbd> — delete selected (mode-scoped: Region mode → region, Baseline mode → baseline)</li>
               <li><kbd>Ctrl</kbd>+<kbd>S</kbd> — save now</li>
             </ul>
 

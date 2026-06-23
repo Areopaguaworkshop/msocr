@@ -4,7 +4,6 @@
   --color-accent: #7c2d2d;
   --color-accent-foreground: #fff;
   --font-geist: 'Geist', sans-serif;
-  --font-sogdian: 'Noto Sans Sogdian', sans-serif;
 }
 
 body {
@@ -18,12 +17,8 @@ body {
   }
 }
 
-.sogdian-text {
-  font-family: var(--font-sogdian);
-  direction: rtl;
-  text-align: right;
-  unicode-bidi: isolate;
-}
+/* ponytail: removed --font-sogdian + .sogdian-text (Noto Sans Sogdian / RTL).
+   Transcription now uses Sims-Williams Latin transliteration, LTR, mono font. */
 
 /* SVG overlay lets wheel/pan pass through to OpenSeadragon, except on shapes.
    ponytail: pointer-events:none on container, auto on shapes — OSD gets the rest. */
