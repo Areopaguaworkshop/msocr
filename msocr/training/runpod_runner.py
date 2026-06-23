@@ -24,7 +24,7 @@ class RunPodRunner:
 
     def __init__(self, api_key: str, image: str, gpu_type: str,
                  ssh_key_path: str, ssh_user: str = "root",
-                 pod_disk_gb: int = 100):
+                 pod_disk_gb: int = 50):
         self.api_key = api_key
         self.image = image
         self.gpu_type = gpu_type
@@ -34,12 +34,17 @@ class RunPodRunner:
         runpod.api_key = api_key
 
     def submit_pod(self, name: str) -> str:
-        """Create a GPU Cloud Pod. Returns pod_id."""
+        """Create a GPU Cloud Pod. Returns pod_id.
+
+        ponytail: ports="22/tcp" ensures SSH is exposed; account-level SSH key
+        (RunPod console settings) is auto-injected — no per-pod env var needed.
+        """
         resp = runpod.create_pod(
             name=name,
             image_name=self.image,
             gpu_type_id=self.gpu_type,
             container_disk_in_gb=self.pod_disk_gb,
+            ports="22/tcp",
         )
         return resp["id"] if isinstance(resp, dict) else resp.id
 
@@ -115,10 +120,13 @@ class RunPodRunner:
     def run_training(self, name: str, train_cmd: list[str],
                      artifact_remote_path: str, artifact_local_path: str,
                      poll_timeout: int = 7200,
-                     pre_train_upload: list[tuple[str, str]] | None = None) -> str:
-        """Full lifecycle: submit → [upload] → ssh train → download → terminate.
+                     pre_train_upload: list[tuple[str, str]] | None = None,
+                     setup_cmds: list[str] | None = None) -> str:
+        """Full lifecycle: submit → [upload] → [setup] → ssh train → download → terminate.
         If ``pre_train_upload`` is provided, each ``(local, remote)`` pair is
         SFTP-put to the pod after submit + IP resolution and before training.
+        If ``setup_cmds`` is provided, each is SSH-exec'd in order after upload
+        and before the train command (e.g. ``pip install kraken``).
         Returns the local artifact path."""
         pod_id = self.submit_pod(name)
         keep_pod_for_recovery = False
@@ -137,6 +145,9 @@ class RunPodRunner:
                 for local, remote in pre_train_upload:
                     self.upload_artifact(local, pod_ip, remote)
             self.ssh_exec(pod_ip, ["mkdir", "-p", str(Path(artifact_remote_path).parent)])
+            if setup_cmds:
+                for cmd_str in setup_cmds:
+                    self.ssh_exec(pod_ip, shlex.split(cmd_str), timeout=600)
             self.ssh_exec(pod_ip, train_cmd, timeout=poll_timeout)
             keep_pod_for_recovery = True
             self.download_artifact(pod_ip, artifact_remote_path, artifact_local_path)

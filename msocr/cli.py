@@ -645,35 +645,41 @@ def runtime_smoke_check_command(
 @click.option("--manifest", required=True, type=click.Path(path_type=Path),
               help="Path to the frozen split manifest JSON")
 @click.option("--style-group", required=True, help="style_group_id to train")
-@click.option("--base-model", required=True, type=click.Path(path_type=Path),
-              help="Path to base .safetensors model")
+@click.option("--base-model", default=None, type=click.Path(path_type=Path),
+              help="Path to base .safetensors model. Omit to train from scratch.")
 @click.option("--output-model", required=True, type=click.Path(path_type=Path),
               help="Path to write the fine-tuned .safetensors model")
 @click.option("--reports-dir", default="reports/", show_default=True,
               type=click.Path(path_type=Path), help="Directory for evaluation reports")
-@click.option("--pod-gpu", default="RTX 4090", show_default=True,
+@click.option("--pod-gpu", default="NVIDIA GeForce RTX 3090", show_default=True,
               help="RunPod GPU Cloud Pod GPU type id")
-@click.option("--pod-image", default="msocr-kraken7:latest", show_default=True,
-              help="RunPod pod Docker image")
+@click.option("--pod-image", default="runpod/pytorch:1.0.2-cu1281-torch260-ubuntu2204",
+              show_default=True, help="RunPod pod Docker image (official PyTorch template)")
 @click.option("--ssh-key", default="~/.ssh/id_ed25519", show_default=True,
               help="SSH private key path for the pod")
-@click.option("--epochs", default=50, show_default=True, type=int,
-              help="Max ketos training epochs")
-@click.option("--min-epochs", default=20, show_default=True, type=int,
+@click.option("--epochs", default=2, show_default=True, type=int,
+              help="Max ketos training epochs (smoke test: 2)")
+@click.option("--min-epochs", default=0, show_default=True, type=int,
               help="Minimum epochs before early stopping is allowed")
 @click.option("--lag", default=10, show_default=True, type=int,
               help="Early-stop lag (epochs without val improvement)")
-@click.option("--freeze-backbone", default=5000, show_default=True, type=int,
-              help="Number of backbone params to freeze")
-@click.option("--augment/--no-augment", default=True, show_default=True,
+@click.option("--freeze-backbone", default=0, show_default=True, type=int,
+              help="Number of backbone samples to freeze (fine-tune only)")
+@click.option("--augment/--no-augment", default=False, show_default=True,
               help="Enable/disable ketos data augmentation")
 @click.option("--device", default="cuda:0", show_default=True,
               help="Training device on the pod")
 @click.option("--workers", default=8, show_default=True, type=int,
               help="Dataloader workers on the pod")
+@click.option("--quit", "quit_mode", default="fixed", show_default=True,
+              help="ketos --quit mode: fixed|early|dilate")
+@click.option("--setup-cmd", "setup_cmds", multiple=True, show_default=True,
+              help="Shell command to run on pod before training (repeatable). "
+                   "Default: pip-install kraken into the RunPod image.")
 def train_remote(manifest, style_group, base_model, output_model, reports_dir,
                  pod_gpu, pod_image, ssh_key, epochs, min_epochs, lag,
-                 freeze_backbone, augment, device, workers) -> None:
+                 freeze_backbone, augment, device, workers, quit_mode,
+                 setup_cmds) -> None:
     """Train one style-group on a RunPod GPU Cloud Pod, then evaluate locally."""
     from msocr.training.orchestrator import walk_style_group
     from msocr.training.runpod_runner import RunPodRunner
@@ -684,6 +690,10 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             "RUNPOD_API_KEY environment variable is not set. "
             "Get one from https://console.runpod.io/tokens."
         )
+
+    # Default setup: install kraken into the official RunPod PyTorch image.
+    if not setup_cmds:
+        setup_cmds = ["uv pip install --system 'kraken>=7.0.2'"]
 
     runner = RunPodRunner(
         api_key=api_key,
@@ -696,7 +706,7 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             manifest_path=str(manifest),
             style_group_id=style_group,
             runner=runner,
-            base_model_path=str(base_model),
+            base_model_path=str(base_model) if base_model else None,
             output_model_path=str(output_model),
             reports_dir=str(reports_dir),
             epochs=epochs,
@@ -706,6 +716,8 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             augment=augment,
             device=device,
             workers=workers,
+            quit_mode=quit_mode,
+            setup_cmds=list(setup_cmds),
         )
     except (RuntimeError, TimeoutError, FileNotFoundError, KeyError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

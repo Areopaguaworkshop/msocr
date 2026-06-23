@@ -3535,8 +3535,636 @@
   ],
   "annotations": {},
   "annotations_v2": {
-    "regions": [],
-    "lines": []
+    "regions": [
+      {
+        "id": "_88d82e51-846e-4a93-9e4d-4b5a8085be66",
+        "polygon": [
+          [
+            286,
+            65
+          ],
+          [
+            511,
+            135
+          ],
+          [
+            546,
+            92
+          ],
+          [
+            620,
+            114
+          ],
+          [
+            617,
+            201
+          ],
+          [
+            667,
+            281
+          ],
+          [
+            662,
+            335
+          ],
+          [
+            726,
+            351
+          ],
+          [
+            726,
+            390
+          ],
+          [
+            773,
+            442
+          ],
+          [
+            872,
+            452
+          ],
+          [
+            968,
+            487
+          ],
+          [
+            957,
+            511
+          ],
+          [
+            983,
+            547
+          ],
+          [
+            988,
+            622
+          ],
+          [
+            927,
+            717
+          ],
+          [
+            837,
+            748
+          ],
+          [
+            812,
+            868
+          ],
+          [
+            837,
+            958
+          ],
+          [
+            968,
+            1015
+          ],
+          [
+            979,
+            1065
+          ],
+          [
+            1053,
+            1080
+          ],
+          [
+            1074,
+            1110
+          ],
+          [
+            1229,
+            1115
+          ],
+          [
+            1385,
+            985
+          ],
+          [
+            1670,
+            995
+          ],
+          [
+            1711,
+            1010
+          ],
+          [
+            1727,
+            1060
+          ],
+          [
+            1902,
+            1151
+          ],
+          [
+            1933,
+            1191
+          ],
+          [
+            1977,
+            1196
+          ],
+          [
+            2002,
+            1231
+          ],
+          [
+            2007,
+            1411
+          ],
+          [
+            1967,
+            1436
+          ],
+          [
+            1826,
+            1457
+          ],
+          [
+            1816,
+            1521
+          ],
+          [
+            1831,
+            1562
+          ],
+          [
+            1776,
+            1618
+          ],
+          [
+            1751,
+            1707
+          ],
+          [
+            1700,
+            1742
+          ],
+          [
+            1536,
+            1773
+          ],
+          [
+            1464,
+            1844
+          ],
+          [
+            1454,
+            1923
+          ],
+          [
+            1399,
+            2039
+          ],
+          [
+            1276,
+            2074
+          ],
+          [
+            1214,
+            2145
+          ],
+          [
+            1039,
+            2190
+          ],
+          [
+            983,
+            2250
+          ],
+          [
+            753,
+            2260
+          ],
+          [
+            761,
+            2245
+          ],
+          [
+            667,
+            2200
+          ],
+          [
+            502,
+            2205
+          ],
+          [
+            402,
+            2185
+          ],
+          [
+            380,
+            2155
+          ],
+          [
+            251,
+            2125
+          ],
+          [
+            186,
+            1979
+          ],
+          [
+            191,
+            1930
+          ],
+          [
+            145,
+            1833
+          ],
+          [
+            176,
+            1573
+          ],
+          [
+            120,
+            1506
+          ],
+          [
+            80,
+            1365
+          ],
+          [
+            85,
+            1281
+          ],
+          [
+            60,
+            1260
+          ],
+          [
+            95,
+            1200
+          ],
+          [
+            130,
+            1054
+          ],
+          [
+            125,
+            960
+          ],
+          [
+            75,
+            933
+          ],
+          [
+            45,
+            888
+          ],
+          [
+            55,
+            844
+          ],
+          [
+            125,
+            797
+          ],
+          [
+            115,
+            633
+          ],
+          [
+            150,
+            562
+          ],
+          [
+            115,
+            497
+          ],
+          [
+            160,
+            442
+          ],
+          [
+            125,
+            405
+          ],
+          [
+            115,
+            356
+          ],
+          [
+            130,
+            326
+          ],
+          [
+            75,
+            290
+          ],
+          [
+            65,
+            206
+          ],
+          [
+            105,
+            140
+          ],
+          [
+            160,
+            115
+          ],
+          [
+            255,
+            110
+          ],
+          [
+            286,
+            65
+          ]
+        ],
+        "type": "MainZone"
+      }
+    ],
+    "lines": [
+      {
+        "id": "l1782245080973",
+        "baseline": [
+          [
+            133,
+            185
+          ],
+          [
+            626,
+            245
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "sʾ qt ny"
+      },
+      {
+        "id": "l1782245146571",
+        "baseline": [
+          [
+            162,
+            321
+          ],
+          [
+            671,
+            364
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "d pyštrw cʾnw"
+      },
+      {
+        "id": "l1782245246260",
+        "baseline": [
+          [
+            165,
+            444
+          ],
+          [
+            755,
+            482
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "q zʾwr mʾt"
+      },
+      {
+        "id": "l1782245383305",
+        "baseline": [
+          [
+            157,
+            531
+          ],
+          [
+            950,
+            638
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "tyʾ sʾ rty xw wyspy "
+      },
+      {
+        "id": "l1782245677636",
+        "baseline": [
+          [
+            161,
+            680
+          ],
+          [
+            821,
+            768
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "tytyt myd cʾnw"
+      },
+      {
+        "id": "l1782245734304",
+        "baseline": [
+          [
+            132,
+            814
+          ],
+          [
+            809,
+            880
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "tyšqwynt qw zprt"
+      },
+      {
+        "id": "l1782245822316",
+        "baseline": [
+          [
+            136,
+            941
+          ],
+          [
+            853,
+            986
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "ʾyd bntt ymʾx"
+      },
+      {
+        "id": "l1782245957866",
+        "baseline": [
+          [
+            181,
+            1047
+          ],
+          [
+            1934,
+            1207
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "t ny tγtʾ bnts ywʾr yty yw šyr"
+      },
+      {
+        "id": "l1782246077185",
+        "baseline": [
+          [
+            146,
+            1160
+          ],
+          [
+            1983,
+            1334
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "pnyqry γwtsq mʾt ʾ ʾw tt xwcqt wnʾt rtšn dbtyq"
+      },
+      {
+        "id": "l1782246154292",
+        "baseline": [
+          [
+            105,
+            1257
+          ],
+          [
+            1897,
+            1440
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "r mʾx ʾ myt tnyʾt yt byntyt mʾx. rty cʾnw xw bʾmsyʾ"
+      },
+      {
+        "id": "l1782246225960",
+        "baseline": [
+          [
+            123,
+            1381
+          ],
+          [
+            1802,
+            1550
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "tr bntypy rty brtpd wntʾ ʾw nyxwrm  rt rty"
+      },
+      {
+        "id": "l1782246285546",
+        "baseline": [
+          [
+            317,
+            1505
+          ],
+          [
+            1748,
+            1638
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "xw nyxwrmzt rty wyn wyd ʾyšt. rty frʾ"
+      },
+      {
+        "id": "l1782246397546",
+        "baseline": [
+          [
+            281,
+            1638
+          ],
+          [
+            1654,
+            1735
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "pnyqrw. rty frʾmʾy bsty dbtyq wyd mrt"
+      },
+      {
+        "id": "l1782246462119",
+        "baseline": [
+          [
+            200,
+            1753
+          ],
+          [
+            1437,
+            1850
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "t rty brtpd wntʾ ʾw xwštr mwγw. sʾ"
+      },
+      {
+        "id": "l1782246564445",
+        "baseline": [
+          [
+            213,
+            1897
+          ],
+          [
+            1381,
+            1976
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "yt bntt. rty wydʾγty frʾmʾy nyt xw"
+      },
+      {
+        "id": "l1782246601464",
+        "baseline": [
+          [
+            241,
+            2017
+          ],
+          [
+            1257,
+            2073
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "ty pyθywn myd xwcq. rty"
+      },
+      {
+        "id": "l1782246654539",
+        "baseline": [
+          [
+            304,
+            2123
+          ],
+          [
+            1138,
+            2157
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "γwy ryty pʾdy wʾsty. rty"
+      },
+      {
+        "id": "l1782246691895",
+        "baseline": [
+          [
+            759,
+            2231
+          ],
+          [
+            969,
+            2244
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "t w"
+      }
+    ]
   },
   "ingestion_path": "local_file",
   "source": "/home/ajiap/project/msocr/tmp/phase3_deskewed/frag_004_deskewed.png",
@@ -3547,5 +4175,5 @@
     47
   ],
   "created_at": "2026-06-22T13:47:30.895041",
-  "updated_at": "2026-06-23T20:18:45.603486"
+  "updated_at": "2026-06-23T21:31:49.373046"
 }

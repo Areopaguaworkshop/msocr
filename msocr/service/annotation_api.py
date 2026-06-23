@@ -348,10 +348,23 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
         if content is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
 
-        if format.lower() == "tsv":
-            return Response(content=content, media_type="text/plain; charset=utf-8")
-        else:
-            return Response(content=content, media_type="application/xml; charset=utf-8")
+        # ponytail: also persist the export into the session dir so it lives on
+        # disk in a known place for Kraken training, not just in the browser
+        # Downloads folder. Best-effort — a write failure shouldn't break the
+        # download.
+        ext = "tsv" if format.lower() == "tsv" else "xml"
+        fname = f"{session_id}.{ext}"
+        try:
+            out_path = manager._get_session_dir(session_id) / fname
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(content, encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not persist %s export for %s: %s", ext, session_id, exc)
+
+        media = "text/plain; charset=utf-8" if format.lower() == "tsv" else "application/xml; charset=utf-8"
+        resp = Response(content=content, media_type=media)
+        resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return resp
 
     @app.get("/api/sessions/{session_id}/line/{line_number}/image")
     def get_line_image(session_id: str, line_number: int) -> Response:

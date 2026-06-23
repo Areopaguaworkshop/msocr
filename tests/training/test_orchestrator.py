@@ -1,23 +1,49 @@
-"""Tests for msocr.training.orchestrator. Runner and eval are mocked."""
+"""Tests for msocr.training.orchestrator. Runner, eval, and polygon
+enrichment are mocked — we only verify the orchestrator's command/upload shape.
+"""
 import json
 from unittest.mock import patch, MagicMock
 
 from msocr.training.orchestrator import walk_style_group
 
 
-def _make_manifest(tmp_path, style_groups=None):
-    """Build a tiny fixture manifest on disk with 1 train + 1 val + 1 holdout in g1."""
+def _write_page_xml(path, image_filename, n_lines=1):
+    """Minimal PAGE XML with n_lines Baselines (no Coords — enrichment adds them)."""
+    lines = "".join(
+        f'<TextLine id="l{i}"><Baseline points="10,{20+i*30} 100,{20+i*30}" />'
+        f'<TextEquiv><Unicode>line{i}</Unicode></TextEquiv></TextLine>'
+        for i in range(n_lines)
+    )
+    xml = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15">'
+        f'<Page imageFilename="{image_filename}" imageWidth="200" imageHeight="200">'
+        f'<TextRegion id="r1"><Coords points="0,0 200,0 200,200 0,200" />{lines}</TextRegion>'
+        f'</Page></PcGts>'
+    )
+    path.write_text(xml)
+
+
+def _make_manifest(tmp_path, style_groups=None, n_train=1, n_val=1):
+    """Build a fixture manifest on disk with real tiny PAGE XML + image files."""
+    items = []
+    for i in range(n_train + n_val):
+        img = tmp_path / f"img{i}.png"
+        img.write_bytes(b"fake-png")  # enrichment/PIL is mocked, bytes irrelevant
+        xml = tmp_path / f"img{i}.xml"
+        _write_page_xml(xml, f"img{i}.png", n_lines=1)
+        items.append((xml, img))
+    train_items = [{"id": f"t{i}", "manuscript_id": "M1", "image": str(items[i][1]), "xml_path": str(items[i][0])}
+                   for i in range(n_train)]
+    val_items = [{"id": f"v{i}", "manuscript_id": "M2", "image": str(items[n_train + i][1]), "xml_path": str(items[n_train + i][0])}
+                 for i in range(n_val)]
+    holdout_items = [{"id": "h0", "manuscript_id": "M3", "image": str(items[0][1]), "xml_path": str(items[0][0])}]
     manifest = {
         "manifest_id": "test-v1",
         "writing_mode": "handwritten",
         "language": "sogdian",
         "script_block": "U+10F30",
-        "base_dir": str(tmp_path),
-        "partitions": {
-            "train": [{"id": "a", "manuscript_id": "M1", "image": "a.tif", "xml_path": "a.xml"}],
-            "validation": [{"id": "b", "manuscript_id": "M2", "image": "b.tif", "xml_path": "b.xml"}],
-            "holdout": [{"id": "c", "manuscript_id": "M3", "image": "c.tif", "xml_path": "c.xml"}],
-        },
+        "partitions": {"train": train_items, "validation": val_items, "holdout": holdout_items},
         "style_groups": style_groups or {"g1": {"manuscript_ids": ["M1", "M2", "M3"]}},
     }
     p = tmp_path / "test-v1.json"
@@ -25,33 +51,25 @@ def _make_manifest(tmp_path, style_groups=None):
     return p
 
 
+def _mock_enrich(src_xml, image, out_xml):
+    """Bypass PIL/kraken — just copy the src XML to out_xml."""
+    from pathlib import Path
+    Path(out_xml).write_bytes(Path(src_xml).read_bytes())
+    return out_xml
+
+
 def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
-    """walk_style_group builds the 7.0 ketos train command, uploads .arrow,
-    runs training, then runs eval on the downloaded model."""
+    """With a base model: --load/--resize/--freeze-backbone emitted; uploads XML+image+manifests."""
     manifest_path = _make_manifest(tmp_path)
     base_model = tmp_path / "base.safetensors"
     base_model.write_bytes(b"base")
 
     fake_runner = MagicMock()
-    # run_training returns the artifact_local_path it was given.
     fake_runner.run_training.return_value = "/tmp/out.safetensors"
-
-    fake_arrow_paths = {
-        "a": str(tmp_path / "train.arrow"),
-        "b": str(tmp_path / "val.arrow"),
-    }
-
-    def fake_compile(self, xmls):
-        # train partition has "a.xml", val partition has "b.xml"
-        stem = __import__("pathlib").Path(xmls[0]).stem
-        return fake_arrow_paths.get(stem, str(tmp_path / "x.arrow"))
-
     fake_report = {"per_style_group": {"g1": {"cer": 0.05}}, "per_manuscript": {}}
 
-    with patch("msocr.training.orchestrator.KetosTrainer.compile_dataset",
-               fake_compile), \
-         patch("msocr.training.orchestrator.run_evaluation",
-               return_value=fake_report) as fake_eval:
+    with patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \
+         patch("msocr.training.orchestrator.run_evaluation", return_value=fake_report) as fake_eval:
         report = walk_style_group(
             manifest_path=str(manifest_path),
             style_group_id="g1",
@@ -59,35 +77,68 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
             base_model_path=str(base_model),
             output_model_path="/tmp/out.safetensors",
             reports_dir="/tmp/reports",
+            augment=True,
         )
 
-    # run_training called once with the 7.0 ketos train command.
     fake_runner.run_training.assert_called_once()
     _, kwargs = fake_runner.run_training.call_args
     train_cmd = kwargs["train_cmd"]
-    assert train_cmd[:7] == [
-        "ketos", "-d", "cuda:0", "--workers", "8", "train",
-        "--load", "/workspace/base.safetensors",
-    ][:7]
-    assert "--resize" in train_cmd
-    assert "--augment" in train_cmd
-    # ponytail: --augment must appear exactly once (plan had a dup bug).
-    assert train_cmd.count("--augment") == 1
-    # pre_train_upload carries the compiled .arrow files for the pod.
-    assert "pre_train_upload" in kwargs
-    uploads = kwargs["pre_train_upload"]
-    assert uploads == [
-        (str(tmp_path / "train.arrow"), "/workspace/train.arrow"),
-        (str(tmp_path / "val.arrow"), "/workspace/val.arrow"),
-        (str(base_model), "/workspace/base.safetensors"),
-    ]
+    assert train_cmd[:6] == ["ketos", "-d", "cuda:0", "--workers", "8", "train"]
+    assert "-f" in train_cmd and "page" in train_cmd
+    assert "-t" in train_cmd and "/workspace/train_manifest.txt" in train_cmd
+    assert "-e" in train_cmd and "/workspace/val_manifest.txt" in train_cmd
+    assert "--load" in train_cmd and "--resize" in train_cmd and "--freeze-backbone" in train_cmd
+    assert "--augment" in train_cmd and train_cmd.count("--augment") == 1
+    assert "--quit" in train_cmd and "fixed" in train_cmd
 
-    # run_evaluation called once with the downloaded model path + style_group.
+    uploads = kwargs["pre_train_upload"]
+    # 1 train XML + 1 train image + 1 val XML + 1 val image + 2 manifests + 1 base = 7
+    assert len(uploads) == 7
+    remote_paths = [dst for _, dst in uploads]
+    assert "/workspace/train_manifest.txt" in remote_paths
+    assert "/workspace/val_manifest.txt" in remote_paths
+    assert "/workspace/base.safetensors" in remote_paths
+    assert any(p.endswith(".xml") for p in remote_paths)
+    assert any(p.endswith(".png") for p in remote_paths)
+
+    # setup_cmds defaults to kraken-install + checkpoint patch.
+    setup = kwargs["setup_cmds"]
+    assert len(setup) == 2
+    assert "kraken" in setup[0]
+    assert "self.net is not None" in setup[1]
+
     fake_eval.assert_called_once()
     _, eval_kwargs = fake_eval.call_args
     assert eval_kwargs["model_path"] == "/tmp/out.safetensors"
     assert eval_kwargs["style_group_id"] == "g1"
     assert report == fake_report
+
+
+def test_walk_style_group_from_scratch_no_load(tmp_path):
+    """With base_model_path=None, no --load/--resize/--freeze-backbone, no base in uploads."""
+    manifest_path = _make_manifest(tmp_path)
+
+    fake_runner = MagicMock()
+    fake_runner.run_training.return_value = "/tmp/out.safetensors"
+
+    with patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \
+         patch("msocr.training.orchestrator.run_evaluation", return_value={}):
+        walk_style_group(
+            manifest_path=str(manifest_path),
+            style_group_id="g1",
+            runner=fake_runner,
+            base_model_path=None,
+            output_model_path="/tmp/out.safetensors",
+            reports_dir="/tmp/reports",
+        )
+
+    _, kwargs = fake_runner.run_training.call_args
+    cmd = kwargs["train_cmd"]
+    assert "--load" not in cmd
+    assert "--resize" not in cmd
+    assert "--freeze-backbone" not in cmd
+    uploads = kwargs["pre_train_upload"]
+    assert all("/workspace/base.safetensors" not in dst for _, dst in uploads)
 
 
 def test_walk_style_group_respects_no_augment(tmp_path):
@@ -97,10 +148,7 @@ def test_walk_style_group_respects_no_augment(tmp_path):
     base_model.write_bytes(b"base")
     fake_runner = MagicMock()
 
-    def fake_compile(self, xmls):
-        return str(tmp_path / f"{__import__('pathlib').Path(xmls[0]).stem}.arrow")
-
-    with patch("msocr.training.orchestrator.KetosTrainer.compile_dataset", fake_compile), \
+    with patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \
          patch("msocr.training.orchestrator.run_evaluation", return_value={}):
         walk_style_group(
             manifest_path=str(manifest_path),

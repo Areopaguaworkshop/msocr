@@ -1,0 +1,42 @@
+{
+  "manifest_id": "e57d259b-smoke",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
+  "script_block": "U+0710",
+  "script_variant": "christian-syriac-script",
+  "base_dir": "dataset/smoke/e57d259b",
+  "partitions": {
+    "train": [
+      {
+        "id": "e57d259b-train",
+        "manuscript_id": "e57d259b",
+        "xml_path": "e57d259b.xml"
+      }
+    ],
+    "validation": [
+      {
+        "id": "e57d259b-val",
+        "manuscript_id": "e57d259b-validation",
+        "xml_path": "e57d259b.xml"
+      }
+    ],
+    "holdout": [
+      {
+        "id": "e57d259b-holdout",
+        "manuscript_id": "e57d259b-holdout",
+        "xml_path": "e57d259b.xml"
+      }
+    ]
+  },
+  "style_groups": {
+    "e57d259b-syriac-smoke": {
+      "manuscript_ids": ["e57d259b", "e57d259b-validation", "e57d259b-holdout"],
+      "description": "Single-page smoke test: 18 lines of Christian Sogdian (Syriac script) from C2AV Berlin plate, annotated in session e57d259b. Train=val=holdout (same page) — only verifies the pipeline end-to-end, not model quality."
+    }
+  },
+  "metadata": {
+    "annotation_session_id": "e57d259b",
+    "line_count": 18,
+    "notes": "Smoke test for RunPod train-remote pipeline. Trains from scratch (no base model) because no Syriac .safetensors base exists. catmus is Latin-only (wrong script). 2 epochs, --quit fixed. Expected cost: a few cents on RTX 3090 spot."
+  }
+}

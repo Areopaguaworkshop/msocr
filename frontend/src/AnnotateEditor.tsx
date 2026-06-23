@@ -106,8 +106,16 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   const [mode, setMode] = useState<Mode>("navigate");
   const [regionType, setRegionType] = useState<RegionType>("MainZone");
   const [lineType, setLineType] = useState<LineType>("DefaultLine");
+  // ponytail: per-session baseline stroke width. Stored client-side only (not in
+  // saved annotation state — that's a display concern, Kraken ignores it).
+  const [lineWidth, setLineWidth] = useState<number>(3);
   const [regions, setRegions] = useState<Region[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
+  // ponytail: boot gate — block saves until the initial load has resolved.
+  // Without this, a click before the fetch returns flips `dirty`, the 2s
+  // autosave timer fires save() with the empty initial state, and the server
+  // gets overwritten with [] — which is exactly the "always restarts empty" bug.
+  const [booted, setBooted] = useState(false);
   // ponytail: per-vertex drag for the selected region — nudge nodes instead of redraw.
   // ceiling: fine for the common "small adjust" case; no edge-midpoint insert yet.
   const [dragVertex, setDragVertex] = useState<{ regionId: string; index: number } | null>(null);
@@ -179,6 +187,8 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             }))
             .filter((l) => l.baseline.length >= 2),
         );
+        // ponytail: release the save gate only after loaded state is committed.
+        setBooted(true);
 
         const viewer = OpenSeadragon({
           id: "osd-viewer",
@@ -317,6 +327,9 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   }, [mode, draftPoints, regionType, markDirty]);
 
   const save = useCallback(async () => {
+    // ponytail: hard gate — never POST before the initial load resolves, or we
+    // race the empty initial state onto the server and wipe saved work.
+    if (!booted) return;
     setStatus("saving…");
     const res = await fetch(`/api/sessions/${sessionId}/annotations`, {
       method: "POST",
@@ -329,18 +342,18 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     } else {
       setStatus("save failed");
     }
-  }, [sessionId, regions, lines]);
+  }, [sessionId, regions, lines, booted]);
 
   // autosave: 2s debounce (not 30s — too laggy)
   useEffect(() => {
-    if (!dirty) return;
+    if (!booted || !dirty) return;
     const t = window.setTimeout(save, 2000);
     return () => window.clearTimeout(t);
-  }, [dirty, save]);
+  }, [booted, dirty, save]);
 
   // save on unload
   useEffect(() => {
-    const handler = () => { if (dirty) navigator.sendBeacon(`/api/sessions/${sessionId}/annotations`, JSON.stringify({ regions, lines })); };
+    const handler = () => { if (booted && dirty) navigator.sendBeacon(`/api/sessions/${sessionId}/annotations`, JSON.stringify({ regions, lines })); };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, regions, lines, sessionId]);
@@ -519,6 +532,11 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       "data-shape": "true",
       className: `annotation-shape${isSel ? " selected" : ""}`,
       onClick: (e: React.MouseEvent) => {
+        // ponytail: regions/baselines must not swallow clicks in other draw modes
+        // (otherwise you can't start a baseline inside a region). Only handle
+        // selection when in a mode that edits this shape's kind.
+        if (kind === "region" && mode === "baseline") return;
+        if (kind === "line" && mode === "region") return;
         e.stopPropagation();
         setSelected({ kind, id: item.id });
         if (kind === "line") {
@@ -536,10 +554,16 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       },
     };
     if (kind === "region") {
+      // ponytail: regions must not block baseline clicks inside them. In
+      // baseline mode, drop pointer events so clicks fall through to the
+      // overlay and start a baseline. (Selection is handled on the SVG parent
+      // via the overlay's own click handler when not in baseline mode.)
+      const regionStyle = mode === "baseline" ? { pointerEvents: "none" as const } : undefined;
       return (
         <polygon
           key={`r:${item.id}`}
           {...common}
+          style={regionStyle}
           points={renderPoints(points)}
           fill={`${color}33`}
           stroke={color}
@@ -556,7 +580,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         stroke={color}
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={isSel ? 5 : 3}
+        strokeWidth={isSel ? lineWidth + 2 : lineWidth}
       />
     );
   }
@@ -743,7 +767,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             </div>
           )}
           {mode === "baseline" && (
-            <div className="absolute top-3 left-3 flex gap-1 bg-white/90 dark:bg-stone-900/90 backdrop-blur p-1 rounded-lg border border-stone-200 dark:border-stone-800">
+            <div className="absolute top-3 left-3 flex gap-1 items-center bg-white/90 dark:bg-stone-900/90 backdrop-blur p-1 rounded-lg border border-stone-200 dark:border-stone-800">
               {LINE_TYPES.map((t) => (
                 <button
                   key={t}
@@ -757,6 +781,19 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                   {t.replace(/Line$/, "")}
                 </button>
               ))}
+              <label className="flex items-center gap-1 px-1 text-[10px] text-stone-500" title="Baseline stroke width">
+                <span>w</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={12}
+                  step={1}
+                  value={lineWidth}
+                  onChange={(e) => setLineWidth(Number(e.target.value))}
+                  className="w-16 accent-stone-700"
+                />
+                <span className="tabular-nums w-4 text-center">{lineWidth}</span>
+              </label>
             </div>
           )}
         </main>
