@@ -691,9 +691,11 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             "Get one from https://console.runpod.io/tokens."
         )
 
-    # Default setup: install kraken into the official RunPod PyTorch image.
+    # Default setup: install kraken + patch the 7.0.2 checkpoint bug.
+    # The patch is idempotent and required for from-scratch training.
     if not setup_cmds:
-        setup_cmds = ["uv pip install --system 'kraken>=7.0.2'"]
+        from msocr.training.orchestrator import _KRAKEN_CHECKPOINT_PATCH
+        setup_cmds = ["uv pip install --system 'kraken>=7.0.2'", _KRAKEN_CHECKPOINT_PATCH]
 
     runner = RunPodRunner(
         api_key=api_key,

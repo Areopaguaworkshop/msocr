@@ -20,23 +20,20 @@ from msocr.evaluation.harness import run_evaluation
 
 # kraken 7.0.2 crashes on checkpoint save when training from scratch
 # (self.net is None until setup()). One-line guard in vgsl.py + base.py.
-# Applied on the pod via sed after pip install. Idempotent: skips if already
-# patched. Upstream bug, unreported as of 2026-06.
-_KRAKEN_CHECKPOINT_PATCH = (
-    "python3 -c \""
-    "import kraken.train.vgsl as v, kraken.train.base as b; "
-    "p=v.__file__; s=open(p).read(); "
-    "if 'if self.net is not None: self.hparams.config.spec' not in s: "
-    "  s=s.replace('self.hparams.config.spec = self.net.spec',"
-    "'if self.net is not None: self.hparams.config.spec = self.net.spec'); "
-    "  open(p,'w').write(s); "
-    "p=b.__file__; s=open(p).read(); "
-    "if 'if metrics and self.net is not None:' not in s: "
-    "  s=s.replace('if metrics:\\n            self.net.user_metadata',"
-    "'if metrics and self.net is not None:\\n            self.net.user_metadata'); "
-    "  open(p,'w').write(s)"
-    "\""
-)
+# Applied on the pod after pip install. Idempotent: skips if already patched.
+# Upstream bug, unreported as of 2026-06.
+_KRAKEN_CHECKPOINT_PATCH = r"""python3 -c "
+import kraken.train.vgsl as v, kraken.train.base as b
+for p, old, new, marker in [
+    (v.__file__, 'self.hparams.config.spec = self.net.spec', 'if self.net is not None: self.hparams.config.spec = self.net.spec', 'if self.net is not None: self.hparams.config.spec = self.net.spec'),
+    (b.__file__, 'if metrics:\n            self.net.user_metadata', 'if metrics and self.net is not None:\n            self.net.user_metadata', 'if metrics and self.net is not None:\n            self.net.user_metadata'),
+]:
+    s = open(p).read()
+    if marker not in s:
+        s = s.replace(old, new)
+        open(p, 'w').write(s)
+"
+"""
 
 
 def _enrich_xml_with_polygons(src_xml: Path, image: Path, out_xml: Path) -> Path:
