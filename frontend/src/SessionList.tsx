@@ -74,10 +74,16 @@ export default function SessionList() {
 
   return (
     <div className="min-h-screen bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100">
-      <header className="h-14 flex items-center px-6 border-b border-stone-200 dark:border-stone-800">
+      <header className="h-14 flex items-center justify-between px-6 border-b border-stone-200 dark:border-stone-800">
         <h1 className="text-sm font-medium uppercase tracking-wider text-stone-600 dark:text-stone-400">
           msocr · Sogdian Annotation
         </h1>
+        <a
+          href="/"
+          className="text-xs text-stone-500 hover:text-accent transition-colors"
+        >
+          Plates
+        </a>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 grid gap-8 md:grid-cols-[1fr_360px]">

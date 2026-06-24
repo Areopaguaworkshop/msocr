@@ -94,6 +94,7 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
             output_model_path="/tmp/out.safetensors",
             reports_dir="/tmp/reports",
             augment=True,
+            device="cuda:0",
         )
 
     fake_runner.run_training.assert_called_once()
@@ -131,14 +132,17 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
 
 
 def test_walk_style_group_from_scratch_no_load(tmp_path):
-    """With base_model_path=None, no --load/--resize/--freeze-backbone, no base in uploads."""
+    """With no base model resolvable, no --load/--resize/--freeze-backbone, no base in uploads."""
     manifest_path = _make_manifest(tmp_path)
 
     fake_runner = MagicMock()
     fake_runner.run_training.return_value = "/tmp/out.safetensors"
 
-    with patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \
-         patch("msocr.training.orchestrator.run_evaluation", return_value={}):
+    # ponytail: script_block U+10F30 now resolves to a default base model; clear
+    # the registry to force the from-scratch path and test it in isolation.
+    with patch("msocr.language_registry.DEFAULT_BASE_MODELS", {}), \
+         patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \
+         patch("msocr.training.orchestrator.run_evaluation", return_value={}) as fake_eval:
         walk_style_group(
             manifest_path=str(manifest_path),
             style_group_id="g1",
@@ -146,6 +150,7 @@ def test_walk_style_group_from_scratch_no_load(tmp_path):
             base_model_path=None,
             output_model_path="/tmp/out.safetensors",
             reports_dir="/tmp/reports",
+            device="cuda:0",
         )
 
     _, kwargs = fake_runner.run_training.call_args
@@ -178,3 +183,32 @@ def test_walk_style_group_respects_no_augment(tmp_path):
 
     _, kwargs = fake_runner.run_training.call_args
     assert "--augment" not in kwargs["train_cmd"]
+
+
+def test_walk_style_group_resolves_script_block_default_base(tmp_path):
+    """No explicit base_model_path + script_block U+10F30 → DEFAULT_BASE_MODELS[...] is loaded."""
+    manifest_path = _make_manifest(tmp_path)
+    avestan = tmp_path / "avestan.mlmodel"
+    avestan.write_bytes(b"avestan")
+
+    fake_runner = MagicMock()
+    fake_runner.run_training.return_value = "/tmp/out.safetensors"
+    with patch("msocr.language_registry.DEFAULT_BASE_MODELS",
+               {"U+10F30": str(avestan)}), \
+         patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \
+         patch("msocr.training.orchestrator.run_evaluation", return_value={}):
+        walk_style_group(
+            manifest_path=str(manifest_path),
+            style_group_id="g1",
+            runner=fake_runner,
+            base_model_path=None,
+            output_model_path="/tmp/out.safetensors",
+            reports_dir="/tmp/reports",
+            device="cuda:0",
+        )
+
+    _, kwargs = fake_runner.run_training.call_args
+    cmd = kwargs["train_cmd"]
+    assert "--load" in cmd and "--resize" in cmd
+    uploads = kwargs["pre_train_upload"]
+    assert any(dst == "/workspace/base.safetensors" for _, dst in uploads)

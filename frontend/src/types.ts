@@ -46,3 +46,16 @@ export interface LanguageInfo {
   direction: string;
   web_font: string;
 }
+
+export interface PlateInfo {
+  plate_number: number;
+  filename: string;
+  path: string;
+  thumbnail_url: string;
+  status: {
+    session_id: string;
+    line_count: number;
+    transcribed_count: number;
+    updated_at: string;
+  } | null;
+}

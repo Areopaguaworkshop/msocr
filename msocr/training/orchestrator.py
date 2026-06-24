@@ -116,7 +116,9 @@ def walk_style_group(
 ) -> dict:
     """Train + evaluate one style-group. Returns the eval report dict.
 
-    If ``base_model_path`` is None, trains from scratch (no --load/--resize/--freeze-backbone).
+    Base model resolution (first wins): explicit ``base_model_path`` arg >
+    style_group ``base_model_override`` in manifest > ``DEFAULT_BASE_MODELS``
+    for the manifest's ``script_block``. If none match, trains from scratch.
     If ``setup_cmds`` is None, defaults to installing kraken into the pod image.
     """
     if setup_cmds is None:
@@ -127,7 +129,16 @@ def walk_style_group(
     manifest = load_frozen_manifest(manifest_path)
     sg = (manifest.style_groups or {}).get(style_group_id) or {}
     base_override = sg.get("base_model_override")
-    load_model = base_override or base_model_path
+    # ponytail: resolve base model in priority order — explicit arg > style_group
+    # override > manifest script_block default. None of these = train from scratch.
+    if base_override:
+        load_model = base_override
+    elif base_model_path:
+        load_model = base_model_path
+    else:
+        from msocr.language_registry import default_base_model_for_script_block
+        default = default_base_model_for_script_block(manifest.script_block)
+        load_model = str(default) if default else None
     load_model_path = Path(load_model) if load_model else None
     if load_model_path and not load_model_path.exists():
         raise FileNotFoundError(f"Base model for RunPod training not found: {load_model_path}")

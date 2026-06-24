@@ -188,6 +188,23 @@ class SessionManager:
         """Get the page.tif path."""
         return self._get_session_dir(session_id) / "page.tif"
 
+    def _probe_page_image_size(self, session_id: str) -> tuple[int | None, int | None]:
+        """Return (width, height) of the normalized page.tif, or (None, None) if unreadable.
+
+        ponytail: PIL is already a kraken dependency; one Image.open call.
+        Used by _export_page_xml to write imageWidth/imageHeight that kraken's
+        PAGE parser requires.
+        """
+        p = self._get_page_image_path(session_id)
+        if not p.exists():
+            return None, None
+        try:
+            from PIL import Image
+            with Image.open(p) as im:
+                return im.width, im.height
+        except Exception:
+            return None, None
+
     def _get_crops_dir(self, session_id: str) -> Path:
         """Get the crops directory path."""
         return self._get_session_dir(session_id) / "crops"
@@ -200,6 +217,7 @@ class SessionManager:
         source: str,
         lines: Optional[List[LineSegment]] = None,
         segmentation_engine: SegmentationEngine = SegmentationEngine.BLLA,
+        session_id_override: Optional[str] = None,
     ) -> AnnotationSession:
         """Create a new annotation session.
         
@@ -210,12 +228,16 @@ class SessionManager:
             source: Source path or URL
             lines: Pre-segmented lines (optional)
             segmentation_engine: Segmentation engine used (default: BLLA)
-        
+            session_id_override: Use a specific session_id instead of a random uuid.
+                Used by the plate-gallery flow so session_id follows the c2avNN
+                convention and plate-status lookup works. Caller must ensure
+                uniqueness (the API layer checks for an existing session).
+         
         Returns:
             Created AnnotationSession
         """
         language = normalize_language_code(language)
-        session_id = str(uuid.uuid4())[:8]
+        session_id = session_id_override or str(uuid.uuid4())[:8]
         
         # Set manual review flag for fallback segmentation
         needs_manual_review = segmentation_engine in (
@@ -310,6 +332,25 @@ class SessionManager:
                 with open(annotations_path, 'r', encoding='utf-8') as f:
                     annotations = json.load(f)
                     session.annotations = annotations
+
+            # ponytail: auto-restore v2 drawing-UI state from GT XML if the
+            # session has no annotations_v2 but a GT XML exists at the
+            # canonical corpus location. This makes reopened sessions show
+            # their prior regions + lines + transcripts instead of a blank
+            # canvas. Convention: gt/{session_id}_page_*.xml under the corpus
+            # root (parent of plates/ or source/).
+            if not session.annotations_v2:
+                gt_xml = self._find_gt_xml_for_session(session)
+                if gt_xml is not None:
+                    v2 = self.import_page_xml_to_v2(gt_xml)
+                    if v2:
+                        session.annotations_v2 = v2
+                        # persist so next get_session skips the parse
+                        self._save_session(session)
+                        logger.info(
+                            "Auto-imported v2 state for %s from %s (%d regions, %d lines)",
+                            session_id, gt_xml, len(v2["regions"]), len(v2["lines"]),
+                        )
             
             return session
 
@@ -373,6 +414,163 @@ class SessionManager:
         if session is None:
             return None
         return session.annotations_v2
+
+    def _find_gt_xml_for_session(self, session: AnnotationSession) -> Optional[Path]:
+        """Find the canonical GT XML for a session, if any.
+
+        Convention: the session's source points at a plate image under
+        ``{corpus_root}/plates/p-NN.png`` (or ``{corpus_root}/source/...``).
+        The GT XML lives at ``{corpus_root}/gt/{session_id}_page_*.xml``.
+        Returns the first match, or None.
+        """
+        src = Path(session.source)
+        if not src.is_absolute():
+            src = Path.cwd() / src
+        # walk up to find the corpus root (parent of plates/ or source/)
+        # ponytail: max 3 levels up — corpus root is at most 1 level above plates/
+        for parent in src.parents:
+            if (parent / "plates").is_dir() or (parent / "source").is_dir():
+                gt_dir = parent / "gt"
+                if gt_dir.is_dir():
+                    matches = sorted(gt_dir.glob(f"{session.session_id}_page_*.xml"))
+                    if matches:
+                        return matches[0]
+                return None
+            if parent == parent.parent:
+                break
+        return None
+
+    # ponytail: PAGE XML → v2 state parser. Used to restore drawing-UI state
+    # (regions + lines + transcripts) when a session is reopened and
+    # annotations_v2 is empty but a GT XML exists. Also used by the plate
+    # gallery's create-session flow to skip re-segmentation when geometry
+    # already exists in a GT XML.
+    def import_page_xml_to_v2(self, xml_path: Path) -> Optional[Dict[str, Any]]:
+        """Parse a PAGE XML file into v2 annotation state.
+
+        Extracts regions (id + polygon + SegmOnto type) and lines (id +
+        baseline + boundary + type + transcript). Returns None if the file
+        can't be parsed or contains no regions/lines.
+
+        Args:
+            xml_path: Path to a PAGE XML file (kraken-compatible, 2019-07-15 schema)
+
+        Returns:
+            {"regions": [...], "lines": [...]} or None
+        """
+        if not xml_path.exists():
+            return None
+        try:
+            import xml.etree.ElementTree as ET
+
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            ns = {"page": "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"}
+
+            def _parse_points(pts_str: str) -> List[Tuple[int, int]]:
+                return [(int(x), int(y)) for x, y in (p.split(",") for p in pts_str.split())]
+
+            def _type_from_custom(custom: str) -> str:
+                # ponytail: kraken writes custom="structure {type:MainZone;}" —
+                # extract the type. Fallback to DefaultLine/MainZone.
+                import re
+                m = re.search(r"type:([^;]+)", custom or "")
+                return m.group(1).strip() if m else ""
+
+            regions: List[Dict[str, Any]] = []
+            lines: List[Dict[str, Any]] = []
+
+            for region in root.findall(".//page:TextRegion", ns):
+                rid = region.get("id", f"r{len(regions)+1}")
+                rtype = _type_from_custom(region.get("custom", "")) or "MainZone"
+                coords = region.find("page:Coords", ns)
+                polygon = _parse_points(coords.get("points")) if coords is not None else []
+                regions.append({"id": rid, "polygon": polygon, "type": rtype})
+                # lines nested under this region
+                for line in region.findall("page:TextLine", ns):
+                    lid = line.get("id", f"l{len(lines)+1}")
+                    ltype = _type_from_custom(line.get("custom", "")) or "DefaultLine"
+                    line_coords = line.find("page:Coords", ns)
+                    boundary = _parse_points(line_coords.get("points")) if line_coords is not None else []
+                    baseline_el = line.find("page:Baseline", ns)
+                    baseline = _parse_points(baseline_el.get("points")) if baseline_el is not None else []
+                    transcript = ""
+                    te = line.find("page:TextEquiv", ns)
+                    if te is not None:
+                        uni = te.find("page:Unicode", ns)
+                        if uni is not None and uni.text:
+                            transcript = uni.text
+                    lines.append({
+                        "id": lid,
+                        "baseline": baseline,
+                        "boundary": boundary,
+                        "type": ltype,
+                        "transcript": transcript,
+                    })
+
+            # ponytail: also catch lines not nested under a region (some XMLs
+            # attach TextLine directly to Page). Rare but shouldn't be lost.
+            page = root.find(".//page:Page", ns)
+            if page is not None:
+                for line in page.findall("page:TextLine", ns):
+                    lid = line.get("id", f"l{len(lines)+1}")
+                    ltype = _type_from_custom(line.get("custom", "")) or "DefaultLine"
+                    line_coords = line.find("page:Coords", ns)
+                    boundary = _parse_points(line_coords.get("points")) if line_coords is not None else []
+                    baseline_el = line.find("page:Baseline", ns)
+                    baseline = _parse_points(baseline_el.get("points")) if baseline_el is not None else []
+                    transcript = ""
+                    te = line.find("page:TextEquiv", ns)
+                    if te is not None:
+                        uni = te.find("page:Unicode", ns)
+                        if uni is not None and uni.text:
+                            transcript = uni.text
+                    # skip if already captured (nested path found it first)
+                    if not any(ln["id"] == lid for ln in lines):
+                        lines.append({
+                            "id": lid,
+                            "baseline": baseline,
+                            "boundary": boundary,
+                            "type": ltype,
+                            "transcript": transcript,
+                        })
+
+            if not regions and not lines:
+                return None
+            return {"regions": regions, "lines": lines}
+        except Exception as e:
+            logger.error("Failed to import PAGE XML %s: %s", xml_path, e)
+            return None
+
+    def import_v2_from_xml(self, session_id: str, xml_path: Path) -> Optional[AnnotationSession]:
+        """Import v2 annotation state from a PAGE XML file into a session.
+
+        Parses the XML, populates annotations_v2, and saves. Does NOT touch
+        the v1 annotations dict or the session's segmented lines — those stay
+        as-is. Use this to restore drawing-UI state from a previously-exported
+        GT XML.
+
+        Args:
+            session_id: Target session
+            xml_path: Path to PAGE XML
+
+        Returns:
+            Updated session, or None if session/XML not found
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        v2 = self.import_page_xml_to_v2(xml_path)
+        if v2 is None:
+            return None
+        session.annotations_v2 = v2
+        session.updated_at = datetime.now().isoformat()
+        self._save_session(session)
+        logger.info(
+            "Imported v2 state for session %s from %s: %d regions, %d lines",
+            session_id, xml_path, len(v2["regions"]), len(v2["lines"]),
+        )
+        return session
 
     def export_session(
         self, session_id: str, format: ExportFormat
@@ -801,9 +999,21 @@ class SessionManager:
         # Metadata
         metadata = ET.SubElement(root, "Metadata")
 
-        # Page
+        # Page — kraken's PAGE parser requires imageWidth/imageHeight or it
+        # crashes with TypeError on int(None). Probe the normalized page.tif.
+        # imageFilename is resolved to absolute so kraken can open it regardless
+        # of where the XML lives; the pod-side orchestrator rewrites it anyway.
         page = ET.SubElement(root, "Page")
-        page.set("imageFilename", session.source)
+        src_path = Path(session.source)
+        if not src_path.is_absolute():
+            # ponytail: resolve against CWD (repo root when run via CLI). Could
+            # anchor to sessions_dir if CWD-relative proves fragile in tests.
+            src_path = Path.cwd() / src_path
+        page.set("imageFilename", str(src_path.resolve()) if src_path.exists() else session.source)
+        w, h = self._probe_page_image_size(session.session_id)
+        if w and h:
+            page.set("imageWidth", str(w))
+            page.set("imageHeight", str(h))
 
         if session.annotations_v2 and (session.annotations_v2.get("regions") or session.annotations_v2.get("lines")):
             return self._export_page_xml_v2(session, root, page)

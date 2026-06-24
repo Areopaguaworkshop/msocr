@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
+from pathlib import Path
+from typing import Dict, Optional
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,30 @@ SCRIPT_BLOCKS = {
 }
 
 VALID_SCRIPT_BLOCKS = set(SCRIPT_BLOCKS.values())
+
+# Default Kraken fine-tune base model per script_block. Resolved relative to
+# repo root at call time so missing models fail loudly with a real path.
+# ponytail: a dict, not a config object. Add a block here when a new base
+# model is downloaded; orchestrator picks it up automatically.
+DEFAULT_BASE_MODELS: Dict[str, str] = {
+    "U+0710": "models/kraken/sophro_mhiro_syriac.mlmodel",       # Syriac — Christian Sogdian (East Syriac/Nestorian)
+    "U+10F30": "models/kraken/avestan_ms0040.mlmodel",           # Sogdian national script — closest analog (Middle Iranian, RTL)
+}
+
+
+def default_base_model_for_script_block(script_block: str) -> Optional[Path]:
+    """Resolve the default fine-tune base model path for a script_block.
+
+    Returns None if no default is registered. Caller decides whether to
+    train from scratch or require an explicit --base-model.
+    """
+    rel = DEFAULT_BASE_MODELS.get(script_block)
+    if rel is None:
+        return None
+    # ponytail: repo-root-relative; manifest.py uses the same REPO_ROOT convention.
+    from pathlib import Path as _P
+    repo_root = _P(__file__).resolve().parents[1]
+    return repo_root / rel
 
 
 def script_block_for_language(lang: str) -> str:

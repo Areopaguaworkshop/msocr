@@ -517,6 +517,34 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
         return {"status": "ok"}
 
+    @app.post("/api/sessions/{session_id}/import-xml")
+    def import_xml(session_id: str, xml_path: str) -> Dict[str, Any]:
+        """Import v2 annotation state from a PAGE XML file (manual safety valve).
+
+        The auto-import in get_session covers the canonical gt/{id}_page_*.xml
+        path. Use this endpoint when the XML is at a non-standard location.
+        Body/query: {"xml_path": "/abs/path/to.xml"} or ?xml_path=...
+        """
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        if not xml_path:
+            raise HTTPException(status_code=400, detail="xml_path required")
+        p = Path(xml_path)
+        if not p.is_absolute():
+            p = Path.cwd() / p
+        if not p.exists():
+            raise HTTPException(status_code=404, detail=f"XML not found: {p}")
+        updated = manager.import_v2_from_xml(session_id, p)
+        if updated is None:
+            raise HTTPException(status_code=422, detail="XML parsed but no regions/lines found")
+        v2 = updated.annotations_v2 or {}
+        return {
+            "status": "ok",
+            "regions": len(v2.get("regions", [])),
+            "lines": len(v2.get("lines", [])),
+        }
+
     @app.get("/api/languages")
     def list_languages() -> List[Dict[str, Any]]:
         """List supported languages with RTL/LTR direction and web fonts.
@@ -534,6 +562,97 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
                 }
             )
         return languages
+
+    # ponytail: corpus plate listing for the C2AV Christian Sogdian manuscript.
+    # Hardcoded corpus root for now — C2AV is the only manuscript in scope.
+    # If a second manuscript lands, generalize to /api/corpus/{corpus_id}/plates
+    # with a registry; until then YAGNI.
+    _C2AV_ROOT = Path("dataset/christian_sogdian_c2av")
+    _C2AV_PLATES = _C2AV_ROOT / "plates"
+
+    @app.get("/api/corpus/c2av/plates")
+    def list_c2av_plates() -> List[Dict[str, Any]]:
+        """List all 99 C2AV plates with annotation status.
+
+        Status is derived by matching plate number to existing annotation
+        sessions (session_id like c2avNN, zero-padded 2 digits). A plate is
+        'annotated' if a session exists for it; transcribed line count comes
+        from the session's line transcripts.
+        """
+        if not _C2AV_PLATES.exists():
+            return []
+        # index sessions by plate number for O(1) lookup
+        sessions_by_plate: Dict[int, Dict[str, Any]] = {}
+        for s in manager._all_sessions():
+            sid = s.session_id
+            # session_id convention: c2avNN where NN is 2-digit plate number
+            if sid.startswith("c2av") and sid[4:].isdigit():
+                plate_num = int(sid[4:])
+                transcribed = sum(
+                    1 for ln in s.lines if ln.transcript and ln.transcript.strip()
+                )
+                sessions_by_plate[plate_num] = {
+                    "session_id": sid,
+                    "line_count": len(s.lines),
+                    "transcribed_count": transcribed,
+                    "updated_at": s.updated_at,
+                }
+        plates = []
+        for plate_path in sorted(_C2AV_PLATES.glob("p-*.png")):
+            stem = plate_path.stem  # e.g. p-19
+            num = int(stem.split("-", 1)[1])
+            plates.append({
+                "plate_number": num,
+                "filename": plate_path.name,
+                "path": str(plate_path),
+                "thumbnail_url": f"/api/corpus/c2av/plates/{plate_path.name}/thumbnail",
+                "status": sessions_by_plate.get(num, None),
+            })
+        return plates
+
+    @app.get("/api/corpus/c2av/plates/{filename}/thumbnail")
+    def c2av_plate_thumbnail(filename: str) -> Response:
+        """Serve a plate as a JPEG thumbnail (max 200px wide) for the gallery."""
+        plate_path = _C2AV_PLATES / filename
+        if not plate_path.exists() or not filename.endswith(".png"):
+            raise HTTPException(status_code=404, detail=f"Plate not found: {filename}")
+        from PIL import Image
+        import io
+        with Image.open(plate_path) as img:
+            thumb = img.copy()
+            thumb.thumbnail((200, 280))
+            buf = io.BytesIO()
+            thumb.convert("RGB").save(buf, format="JPEG", quality=80)
+            return Response(content=buf.getvalue(), media_type="image/jpeg")
+
+    @app.post("/api/corpus/c2av/plates/{filename}/session")
+    def create_c2av_plate_session(filename: str) -> Dict[str, Any]:
+        """Create an annotation session for a specific C2AV plate.
+
+        Uses ingestion_path=local_file with the plate as source. Session ID
+        follows the c2avNN convention so plate-status lookup works. Idempotent:
+        if a session already exists for the plate, returns it unchanged.
+        """
+        plate_path = _C2AV_PLATES / filename
+        if not plate_path.exists() or not filename.endswith(".png"):
+            raise HTTPException(status_code=404, detail=f"Plate not found: {filename}")
+        stem = plate_path.stem
+        num = int(stem.split("-", 1)[1])
+        session_id = f"c2av{num:02d}"
+        existing = manager.get_session(session_id)
+        if existing is not None:
+            return _serialize_session(existing)
+        session = manager.create_session(
+            language="sogdian",
+            script_variant="christian-syriac-script",
+            ingestion_path=IngestionPath.LOCAL_FILE,
+            source=str(plate_path),
+            session_id_override=session_id,
+        )
+        populated = manager.populate_session(session_id, image_source=plate_path)
+        if populated is None:
+            raise HTTPException(status_code=500, detail="Failed to populate plate session")
+        return _serialize_session(populated)
 
     # ponytail: SPA serving. /assets mounted from dist (Vite convention);
     # catch-all registered LAST so it cannot shadow /api/* routes. The React

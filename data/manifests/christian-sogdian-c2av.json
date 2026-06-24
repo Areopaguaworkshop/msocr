@@ -1,0 +1,30 @@
+{
+  "manifest_id": "christian-sogdian-c2av",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
+  "script_block": "U+0710",
+  "script_variant": "christian-syriac-script",
+  "base_dir": "dataset/christian_sogdian_c2av",
+  "partitions": {
+    "train": [
+      {"id": "c2av-page-19", "manuscript_id": "c2av19", "xml_path": "gt/c2av19_page_19.xml"}
+    ],
+    "validation": [],
+    "holdout": []
+  },
+  "style_groups": {
+    "christian-syriac-script-c2av": {
+      "manuscript_ids": ["c2av19"],
+      "description": "Christian Sogdian, C2AV (Sims-Williams 1985) plates. Sogdian language written in East Syriac script (U+0710). Fine-tuned from Sophro Mhiro Syriac base.",
+      "base_model_override": "models/kraken/sophro_mhiro_syriac.mlmodel"
+    }
+  },
+  "metadata": {
+    "source_pdf": "SimsWilliams-1985-ChristianSogdianMsC2AVBerlin-Plates.pdf",
+    "source_description": "Sims-Williams, N. (1985). The Christian Sogdian Manuscript C2 (Berlin, Turfan Collection). Plates.",
+    "plate_count": 99,
+    "plates_annotated": ["p-19"],
+    "annotation_session_dir": "annotation/sessions",
+    "notes": "Canonical corpus layout. New plates are added by annotating plates/p-NN.png in the browser UI (plate gallery), then exporting GT to gt/. Annotation sessions live under annotation/sessions/{session_id}/."
+  }
+}
