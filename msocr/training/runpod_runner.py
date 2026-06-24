@@ -60,8 +60,10 @@ class RunPodRunner:
         while time.time() < deadline:
             pod = runpod.get_pod(pod_id)
             rt = pod.get("runtime") if isinstance(pod, dict) else None
-            ports = rt.get("ports", []) if isinstance(rt, dict) else []
+            ports = (rt.get("ports") or []) if isinstance(rt, dict) else []
             for p in ports:
+                if not isinstance(p, dict):
+                    continue
                 if p.get("privatePort") == 22 and p.get("isIpPublic"):
                     return (p["ip"], int(p["publicPort"]))
             time.sleep(10)
@@ -128,31 +130,53 @@ class RunPodRunner:
         runpod.terminate_pod(pod_id)
 
     def run_training(self, name: str, train_cmd: list[str],
-                     artifact_remote_path: str, artifact_local_path: str,
+                     artifact_remote_dir: str, artifact_local_path: str,
                      poll_timeout: int = 7200,
                      pre_train_upload: list[tuple[str, str]] | None = None,
                      setup_cmds: list[str] | None = None) -> str:
-        """Full lifecycle: submit → [upload] → [setup] → ssh train → download → terminate.
+        """Full lifecycle: submit → [upload] → [setup] → ssh train → glob → download → terminate.
         If ``pre_train_upload`` is provided, each ``(local, remote)`` pair is
         SFTP'd to the pod before ``setup_cmds`` run.
         If ``setup_cmds`` is provided, each is run via SSH before training.
+        Ketos 7.0 writes ``best_{score:.4f}.safetensors`` into ``artifact_remote_dir``;
+        the score suffix is unknown until training ends, so we glob the dir
+        and pick the (alphabetically) last ``best_*.safetensors`` — highest score.
         Returns the local artifact path."""
+        stage = "creating RunPod pod"
         pod_id = self.submit_pod(name)
         keep_pod_for_recovery = False
         try:
+            stage = "waiting for pod SSH endpoint"
             pod_hostport = self._ssh_endpoint(pod_id)
             if pre_train_upload:
                 for local, remote in pre_train_upload:
+                    stage = f"uploading {local} to {remote}"
                     self.upload_artifact(local, pod_hostport, remote)
-            self.ssh_exec(pod_hostport, ["mkdir", "-p", str(Path(artifact_remote_path).parent)])
+            stage = f"creating remote artifact directory {artifact_remote_dir}"
+            self.ssh_exec(pod_hostport, ["mkdir", "-p", artifact_remote_dir])
             if setup_cmds:
                 for cmd_str in setup_cmds:
+                    stage = f"running setup command: {cmd_str[:120]}"
                     self.ssh_exec(pod_hostport, shlex.split(cmd_str), timeout=600)
+            stage = "running remote training command"
             self.ssh_exec(pod_hostport, train_cmd, timeout=poll_timeout)
             keep_pod_for_recovery = True
-            self.download_artifact(pod_hostport, artifact_remote_path, artifact_local_path)
+            # ponytail: glob best_*.safetensors, sort desc, take first.
+            # ls sorts ascending so `best_0.9` < `best_0.95`; tail -1 = highest score.
+            stage = f"locating best_*.safetensors under {artifact_remote_dir}"
+            listing = self.ssh_exec(pod_hostport,
+                ["sh", "-c", f"ls -1 {artifact_remote_dir}/best_*.safetensors 2>/dev/null | sort | tail -1"])
+            remote_best = listing.strip()
+            if not remote_best:
+                raise FileNotFoundError(
+                    f"no best_*.safetensors found under {artifact_remote_dir}; "
+                    f"training may have failed or written to a different path")
+            stage = f"downloading {remote_best} to {artifact_local_path}"
+            self.download_artifact(pod_hostport, remote_best, artifact_local_path)
             keep_pod_for_recovery = False
             return artifact_local_path
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"{stage}: {exc}") from exc
         finally:
             if not keep_pod_for_recovery:
                 self.terminate_pod(pod_id)

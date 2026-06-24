@@ -51,10 +51,20 @@ def _make_manifest(tmp_path, style_groups=None, n_train=1, n_val=1):
     return p
 
 
-def _mock_enrich(src_xml, image, out_xml):
+def _mock_enrich(src_xml, image, out_xml, *, target_image_name=None):
     """Bypass PIL/kraken — just copy the src XML to out_xml."""
     from pathlib import Path
-    Path(out_xml).write_bytes(Path(src_xml).read_bytes())
+    import lxml.etree as ET
+
+    if target_image_name is None:
+        Path(out_xml).write_bytes(Path(src_xml).read_bytes())
+        return out_xml
+
+    ns = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
+    tree = ET.parse(str(src_xml))
+    page = tree.getroot().find(f"{{{ns}}}Page")
+    page.set("imageFilename", target_image_name)
+    tree.write(str(out_xml), xml_declaration=True, encoding="utf-8")
     return out_xml
 
 
@@ -65,7 +75,13 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
     base_model.write_bytes(b"base")
 
     fake_runner = MagicMock()
-    fake_runner.run_training.return_value = "/tmp/out.safetensors"
+    def _assert_uploaded_xml_rewrites_image(**kwargs):
+        upload_by_remote = {remote: local for local, remote in kwargs["pre_train_upload"]}
+        train_xml = upload_by_remote["/workspace/train_0.xml"]
+        assert 'imageFilename="train_0.png"' in open(train_xml).read()
+        return "/tmp/out.safetensors"
+
+    fake_runner.run_training.side_effect = _assert_uploaded_xml_rewrites_image
     fake_report = {"per_style_group": {"g1": {"cer": 0.05}}, "per_manuscript": {}}
 
     with patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \

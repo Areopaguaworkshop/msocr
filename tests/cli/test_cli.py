@@ -59,6 +59,24 @@ def test_train_remote_requires_runpod_api_key(tmp_path, monkeypatch):
     assert "RUNPOD_API_KEY" in result.output
 
 
+def test_train_remote_reports_missing_ssh_key_before_pod_call(tmp_path, monkeypatch):
+    """A missing private key should name the exact path before creating a pod."""
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake")
+    missing_key = tmp_path / "missing_id_ed25519"
+    runner = CliRunner()
+    result = runner.invoke(main, [
+        "train-remote",
+        "--manifest", str(tmp_path / "m.json"),
+        "--style-group", "g1",
+        "--output-model", str(tmp_path / "out.safetensors"),
+        "--ssh-key", str(missing_key),
+    ])
+
+    assert result.exit_code != 0
+    assert "SSH private key not found" in result.output
+    assert str(missing_key) in result.output
+
+
 def test_main_help_lists_new_subcommands():
     runner = CliRunner()
     result = runner.invoke(main, ["--help"])

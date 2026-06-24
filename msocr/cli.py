@@ -667,7 +667,9 @@ def runtime_smoke_check_command(
               help="Number of backbone samples to freeze (fine-tune only)")
 @click.option("--augment/--no-augment", default=False, show_default=True,
               help="Enable/disable ketos data augmentation")
-@click.option("--device", default="cuda:0", show_default=True,
+# ponytail: ketos 7.0.2 crashes on `-d cuda`/`-d cuda:0` with "list index out of range"
+# at the top-level group parser. `-d auto` lets pytorch pick the GPU correctly.
+@click.option("--device", default="auto", show_default=True,
               help="Training device on the pod")
 @click.option("--workers", default=8, show_default=True, type=int,
               help="Dataloader workers on the pod")
@@ -697,11 +699,18 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
         from msocr.training.orchestrator import _KRAKEN_CHECKPOINT_PATCH
         setup_cmds = ["python3 -m pip install --quiet 'kraken>=7.0.2'", _KRAKEN_CHECKPOINT_PATCH]
 
+    ssh_key_path = os.path.expanduser(ssh_key)
+    if not Path(ssh_key_path).is_file():
+        raise click.ClickException(
+            f"SSH private key not found: {ssh_key_path}. "
+            "Pass --ssh-key with the private key registered in your RunPod account."
+        )
+
     runner = RunPodRunner(
         api_key=api_key,
         image=pod_image,
         gpu_type=pod_gpu,
-        ssh_key_path=os.path.expanduser(ssh_key),
+        ssh_key_path=ssh_key_path,
     )
     try:
         report = walk_style_group(

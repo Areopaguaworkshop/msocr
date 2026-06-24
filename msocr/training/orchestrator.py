@@ -36,11 +36,15 @@ for p, old, new, marker in [
 """
 
 
-def _enrich_xml_with_polygons(src_xml: Path, image: Path, out_xml: Path) -> Path:
+def _enrich_xml_with_polygons(src_xml: Path, image: Path, out_xml: Path, *, target_image_name: str | None = None) -> Path:
     """Compute <Coords> for each <TextLine> and write a new PAGE XML.
 
     kraken 7.x requires <Coords> per <TextLine>; our export only has
     <Baseline>. Falls back to the image path next to the XML if not given.
+
+    If ``target_image_name`` is set, rewrite <Page imageFilename> so the XML
+    resolves the image by its uploaded basename (kraken opens imageFilename
+    relative to the XML, not the original filesystem path).
     """
     import lxml.etree as ET
     from PIL import Image
@@ -52,6 +56,8 @@ def _enrich_xml_with_polygons(src_xml: Path, image: Path, out_xml: Path) -> Path
     page = root.find(f"{{{NS}}}Page")
     if page is None:
         raise ValueError(f"No <Page> in {src_xml}")
+    if target_image_name:
+        page.set("imageFilename", target_image_name)
     im = Image.open(str(image)).convert("L")
     baselines: list[list[tuple[int, int]]] = []
     lines_xml: list[ET._Element] = []
@@ -103,7 +109,7 @@ def walk_style_group(
     lag: int = 10,
     freeze_backbone: int = 0,
     augment: bool = True,
-    device: str = "cuda:0",
+    device: str = "auto",  # ponytail: ketos 7.0.2 crashes on `-d cuda`; auto lets pytorch pick the GPU.
     workers: int = 8,
     quit_mode: str = "fixed",
     setup_cmds: list[str] | None = None,
@@ -145,9 +151,10 @@ def walk_style_group(
                 continue
             image = _resolve_image_for_xml(c.xml_path, c.image)
             enriched_xml = tmp_path / f"{part}_{idx}_poly.xml"
-            _enrich_xml_with_polygons(c.xml_path, image, enriched_xml)
+            remote_img_name = f"{part}_{idx}.png"
+            _enrich_xml_with_polygons(c.xml_path, image, enriched_xml, target_image_name=remote_img_name)
             remote_xml = f"/workspace/{part}_{idx}.xml"
-            remote_img = f"/workspace/{part}_{idx}.png"
+            remote_img = f"/workspace/{remote_img_name}"
             pre_train_upload.append((str(enriched_xml), remote_xml))
             pre_train_upload.append((str(image), remote_img))
             manifest_lines.append(remote_xml)
@@ -184,7 +191,10 @@ def walk_style_group(
         runner.run_training(
             name=f"{manifest.manifest_id}-{style_group_id}",
             train_cmd=train_cmd,
-            artifact_remote_path=f"/workspace/models/{style_group_id}_best.safetensors",
+            # ponytail: ketos 7.0 writes best_{score:.4f}.safetensors into the -o dir;
+            # score is unknown until training ends, so we glob the dir post-train.
+            # Runner does the glob via ssh_exec + download_artifact against the resolved name.
+            artifact_remote_dir=f"/workspace/models/{style_group_id}",
             artifact_local_path=output_model_path,
             pre_train_upload=pre_train_upload,
             setup_cmds=setup_cmds,

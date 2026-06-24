@@ -45,6 +45,26 @@ def test_ssh_endpoint_polls_until_runtime_ports_has_public_22(monkeypatch):
     assert fake_runpod.get_pod.call_count == 3
 
 
+def test_ssh_endpoint_treats_none_ports_as_not_ready(monkeypatch):
+    """RunPod can report runtime.ports as None before port metadata is ready."""
+    fake_runpod = MagicMock()
+    fake_runpod.get_pod.side_effect = [
+        {"id": "p", "runtime": {"ports": None}},
+        {"id": "p", "runtime": {"ports": [
+            {"privatePort": 22, "isIpPublic": True, "ip": "1.2.3.4", "publicPort": 17445},
+        ]}},
+    ]
+    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
+    monkeypatch.setattr("time.sleep", lambda *a: None)
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    host, port = runner._ssh_endpoint("p", deadline_s=60)
+    assert host == "1.2.3.4"
+    assert port == 17445
+    assert fake_runpod.get_pod.call_count == 2
+
+
 def test_ssh_endpoint_raises_when_no_public_port(monkeypatch):
     """If runtime.ports never exposes a public port 22, raise RuntimeError."""
     fake_runpod = MagicMock()
