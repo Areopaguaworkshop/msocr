@@ -126,6 +126,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   const [viewportTick, setViewportTick] = useState(0);
   const [twoClickActive, setTwoClickActive] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
 
   const imageUrl = `/api/sessions/${sessionId}/image`;
 
@@ -491,7 +492,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         return;
       }
       if (e.key === "v") setMode("navigate");
-      if (e.key === "r") setMode("region");
+      if (advanced && e.key === "r") setMode("region");
       if (e.key === "b") setMode("baseline");
       if (e.key === "t") setMode("transcribe");
       if (e.key === "Escape") { setDraftPoints([]); setTwoClickActive(false); }
@@ -506,8 +507,8 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
   const stats = useMemo(() => {
     const transcribed = lines.filter((l) => l.transcript.trim()).length;
-    return `${transcribed}/${lines.length} lines · ${regions.length} regions`;
-  }, [lines, regions]);
+    return `${transcribed}/${lines.length} lines${advanced ? ` · ${regions.length} regions` : ""}`;
+  }, [lines, regions, advanced]);
 
   // ponytail: delete is mode-scoped, so the trash button is only live when
   // the current mode matches the selected shape's kind.
@@ -593,6 +594,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     { mode: "baseline", label: "Baseline", icon: <ScribbleLoop size={16} />, hint: "B — click start, click end" },
     { mode: "transcribe", label: "Transcribe", icon: <TextAUnderline size={16} />, hint: "T — select a line to type" },
   ];
+  const visibleModes = advanced ? modes : modes.filter((m) => m.mode !== "region");
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -603,6 +605,13 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         <span className="text-xs text-stone-400">{stats}</span>
         <div className="flex-1" />
         <span className={`text-xs ${dirty ? "text-amber-600 dark:text-amber-400" : "text-stone-400"}`}>{status}</span>
+        <button
+          onClick={() => setAdvanced((v) => !v)}
+          title="Toggle region annotation tools (not needed for Kraken training)"
+          className={`flex items-center justify-center w-7 h-7 text-xs rounded-lg border transition-colors ${advanced ? "bg-accent text-white border-accent" : "border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
+        >
+          A
+        </button>
         <button
           onClick={() => setShowHelp(true)}
           title="How to use this editor"
@@ -627,7 +636,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[56px_1fr_380px] overflow-hidden">
         {/* toolbar rail */}
         <aside className="hidden lg:flex flex-col items-center py-3 gap-1 border-r border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950">
-          {modes.map((m) => (
+          {visibleModes.map((m) => (
             <button
               key={m.mode}
               onClick={() => { setMode(m.mode); setDraftPoints([]); setTwoClickActive(false); }}
@@ -674,7 +683,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
         {/* mobile mode bar */}
         <div className="lg:hidden flex border-b border-stone-200 dark:border-stone-800">
-          {modes.map((m) => (
+          {visibleModes.map((m) => (
             <button
               key={m.mode}
               onClick={() => { setMode(m.mode); setDraftPoints([]); setTwoClickActive(false); }}
@@ -915,7 +924,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
             <h3 className="font-semibold mt-4 mb-2">Workflow</h3>
             <ol className="list-decimal pl-5 space-y-1 text-stone-700 dark:text-stone-300">
-              <li><b>Regions</b> (R): enclose text areas. Click points, double-click to close. Pick the right type from the top-left palette.</li>
+              <li><b>Regions</b> (R, <i>Advanced</i>): optional — enclose text areas. Click points, double-click to close. Pick the right type from the top-left palette. <b>Not required for Kraken training.</b></li>
               <li><b>Baselines</b> (B): the reading line under each line of text. Click start, click end — that's it.</li>
               <li><b>Transcribe</b> (T): select a baseline, type the Sogdian text (Sims-Williams Latin transliteration) in the right panel. Press <code>Enter</code> to save and jump to the next line.</li>
               <li><b>Export</b>: click <i>PAGE XML</i> in the top bar to download for Kraken training.</li>
@@ -924,11 +933,12 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             <h3 className="font-semibold mt-4 mb-2">Modes</h3>
             <ul className="space-y-1 text-stone-700 dark:text-stone-300">
               <li><b>Navigate</b> (V) — pan and zoom the image. Hover any label for a 3-second tooltip.</li>
-              <li><b>Region</b> (R) — draw region polygons. Top-left palette picks the type.</li>
+              <li><b>Region</b> (R, <i>Advanced</i>) — draw region polygons. Top-left palette picks the type.</li>
               <li><b>Baseline</b> (B) — 2-click to draw a baseline. Top-left palette picks the line type.</li>
               <li><b>Transcribe</b> (T) — type the Sims-Williams Latin transliteration in the right panel. Use the character palette below the textarea for aleph, ayin, dotted/special letters.</li>
             </ul>
 
+            {advanced && (<>
             <h3 className="font-semibold mt-4 mb-2">Region types</h3>
             <ul className="space-y-1 text-stone-700 dark:text-stone-300">
               <li><b>MainZone</b> — the primary text column.</li>
@@ -939,6 +949,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               <li><b>DigitizationArtefactZone</b> — scan bleed-through, shadows, ruler marks.</li>
               <li><b>CustomZone</b> — anything else.</li>
             </ul>
+            </>)}
 
             <h3 className="font-semibold mt-4 mb-2">Line types</h3>
             <ul className="space-y-1 text-stone-700 dark:text-stone-300">
@@ -949,7 +960,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
             <h3 className="font-semibold mt-4 mb-2">Keyboard</h3>
             <ul className="space-y-1 text-stone-700 dark:text-stone-300">
-              <li><kbd>V</kbd> / <kbd>R</kbd> / <kbd>B</kbd> / <kbd>T</kbd> — switch modes</li>
+              <li><kbd>V</kbd> / <kbd>B</kbd> / <kbd>T</kbd> — switch modes <span className="text-stone-400">(R for regions, Advanced only)</span></li>
               <li><kbd>Enter</kbd> (in textarea) — save + next line</li>
               <li><kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> — previous / next line</li>
               <li><kbd>↑</kbd> / <kbd>↓</kbd> (no modifier) — previous / next line</li>
