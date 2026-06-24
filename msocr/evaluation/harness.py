@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -21,16 +23,25 @@ from msocr.training.ketos_trainer import KetosTrainer
 _CER_RE = re.compile(r"CER:\s*([\d.]+)", re.IGNORECASE)
 _WER_RE = re.compile(r"WER:\s*([\d.]+)", re.IGNORECASE)
 _ACC_RE = re.compile(r"Accuracy:\s*([\d.]+)", re.IGNORECASE)
+# ponytail: kraken 7.0.2 emits accuracy percentages, not CER:/WER: labels.
+_CHAR_ACC_RE = re.compile(r"([\d.]+)%\s+Character Accuracy")
+_WORD_ACC_RE = re.compile(r"([\d.]+)%\s+Word Accuracy")
 
 
 def _parse_ketos_stdout(stdout: str) -> dict[str, float]:
     """Extract CER/WER/Accuracy from ketos test stdout. Returns {} for missing."""
-    out = {}
+    out: dict[str, float] = {}
     if m := _CER_RE.search(stdout):
         out["cer"] = float(m.group(1))
+    elif m := _CHAR_ACC_RE.search(stdout):
+        out["cer"] = round(100.0 - float(m.group(1)), 4)
     if m := _WER_RE.search(stdout):
         out["wer"] = float(m.group(1))
+    elif m := _WORD_ACC_RE.search(stdout):
+        out["wer"] = round(100.0 - float(m.group(1)), 4)
     if m := _ACC_RE.search(stdout):
+        out["accuracy"] = float(m.group(1))
+    elif m := _CHAR_ACC_RE.search(stdout):
         out["accuracy"] = float(m.group(1))
     return out
 
@@ -50,16 +61,31 @@ def run_evaluation(
     # ponytail: a per-manuscript config is just the global config with this manifest's
     # dataset section. Could be fancier but YAGNI until we have >1 style_group.
     trainer = KetosTrainer(config or {
-        "dataset": {"format_type": "xml"},
+        "dataset": {"format_type": "page"},
         "model": {"spec": "placeholder"},
         "training": {"epochs": 0, "device": "cpu", "workers": 1},
         "output": {"model_prefix": str(Path(model_path).with_suffix(""))},
     })
 
     per_manuscript: dict[str, dict[str, float]] = {}
-    for case in cases:
-        stdout = trainer.test_model(model_path, case.xml_path)
-        per_manuscript[case.manuscript_id] = _parse_ketos_stdout(stdout)
+    # ponytail: kraken 7.0.2 test requires <Coords> per <TextLine>; our holdout XMLs
+    # are baseline-only, so enrich each into a temp file before testing.
+    # Lazy import to avoid circular: orchestrator imports run_evaluation.
+    from msocr.training.orchestrator import _enrich_xml_with_polygons, _resolve_image_for_xml
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        for case in cases:
+            if not case.xml_path:
+                continue
+            image = _resolve_image_for_xml(case.xml_path, case.image)
+            enriched_xml = tmp_path / f"{case.manuscript_id}_poly.xml"
+            _enrich_xml_with_polygons(case.xml_path, image, enriched_xml)
+            # ponytail: kraken resolves <Page imageFilename> relative to the XML,
+            # not the original filesystem path. Copy the image next to the
+            # enriched XML so it resolves.
+            shutil.copy2(image, tmp_path / Path(image).name)
+            stdout = trainer.test_model(model_path, str(enriched_xml))
+            per_manuscript[case.manuscript_id] = _parse_ketos_stdout(stdout)
 
     # Aggregate per-style-group: mean of per-manuscript metrics
     sg_metrics: dict[str, float] = {}

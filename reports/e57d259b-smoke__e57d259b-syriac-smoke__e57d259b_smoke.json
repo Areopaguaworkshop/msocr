@@ -1,0 +1,20 @@
+{
+  "manifest_id": "e57d259b-smoke",
+  "style_group_id": "e57d259b-syriac-smoke",
+  "script_block": "U+0710",
+  "model_path": "models/kraken/e57d259b_smoke.safetensors",
+  "per_manuscript": {
+    "e57d259b-holdout": {
+      "cer": 96.04,
+      "wer": 97.12,
+      "accuracy": 3.96
+    }
+  },
+  "per_style_group": {
+    "e57d259b-syriac-smoke": {
+      "cer": 96.04,
+      "wer": 97.12,
+      "accuracy": 3.96
+    }
+  }
+}
