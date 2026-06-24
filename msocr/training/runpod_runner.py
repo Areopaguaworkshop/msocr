@@ -48,14 +48,35 @@ class RunPodRunner:
         )
         return resp["id"] if isinstance(resp, dict) else resp.id
 
-    def ssh_exec(self, pod_ip: str, cmd: list[str], timeout: int = 7200) -> str:
+    # ponytail: RunPod exposes SSH on a random public port; runtime.ports[].ip
+    # and publicPort hold host:port once the container has booted. runtime is
+    # None until the container starts; on Community Cloud that can take 60-180s.
+    def _ssh_endpoint(self, pod_id: str, deadline_s: int = 600) -> tuple[str, int]:
+        """Poll get_pod until runtime.ports has a public entry for port 22.
+
+        Returns (host, port).
+        """
+        deadline = time.time() + deadline_s
+        while time.time() < deadline:
+            pod = runpod.get_pod(pod_id)
+            rt = pod.get("runtime") if isinstance(pod, dict) else None
+            ports = rt.get("ports", []) if isinstance(rt, dict) else []
+            for p in ports:
+                if p.get("privatePort") == 22 and p.get("isIpPublic"):
+                    return (p["ip"], int(p["publicPort"]))
+            time.sleep(10)
+        raise RuntimeError(f"pod {pod_id} never exposed a public SSH port")
+
+    def ssh_exec(self, pod_hostport: tuple[str, int], cmd: list[str],
+                 timeout: int = 7200) -> str:
         """SSH into the pod and exec a command. Returns stdout. Raises on non-zero exit."""
+        host, port = pod_hostport
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         # ponytail: 3 retries with 30s backoff — pod boot can be slow.
         for attempt in range(3):
             try:
-                client.connect(pod_ip, username=self.ssh_user,
+                client.connect(host, port=port, username=self.ssh_user,
                                 key_filename=self.ssh_key_path, timeout=60)
                 break
             except paramiko.SSHException:
@@ -71,27 +92,15 @@ class RunPodRunner:
             raise RuntimeError(f"pod command failed (exit {exit_status}): {err_text[-2000:]}")
         return stdout.read().decode()
 
-    def poll_until_done(self, pod_id: str, timeout: int = 7200,
-                        interval: int = 30) -> int:
-        """Poll pod status until EXITED or timeout. Returns exit code."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            pod = runpod.get_pod(pod_id)
-            status = pod.get("status") if isinstance(pod, dict) else pod.status
-            if status == "EXITED":
-                runtime = pod.get("runtime", {}) if isinstance(pod, dict) else pod.runtime
-                return int(runtime.get("exitCode", -1)) if isinstance(runtime, dict) else -1
-            time.sleep(interval)
-        raise TimeoutError(f"pod {pod_id} did not exit within {timeout}s")
-
-    def download_artifact(self, pod_ip: str, remote: str, local: str) -> None:
+    def download_artifact(self, pod_hostport: tuple[str, int], remote: str, local: str) -> None:
         """SCP a file from the pod to local. Does NOT terminate the pod on failure
         (so the artifact survives for manual recovery)."""
+        host, port = pod_hostport
         Path(local).parent.mkdir(parents=True, exist_ok=True)
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(pod_ip, username=self.ssh_user,
-                       key_filename=self.ssh_key_path, timeout=60)
+        client.connect(host, port=port, username=self.ssh_user,
+                        key_filename=self.ssh_key_path, timeout=60)
         sftp = client.open_sftp()
         try:
             sftp.get(remote, local)
@@ -99,14 +108,15 @@ class RunPodRunner:
             sftp.close()
             client.close()
 
-    def upload_artifact(self, local: str, pod_ip: str, remote: str) -> None:
+    def upload_artifact(self, local: str, pod_hostport: tuple[str, int], remote: str) -> None:
         """SCP a local file to the pod. Symmetric to download_artifact.
         Does NOT terminate the pod on failure — let the exception propagate so
         the caller can recover or terminate explicitly."""
+        host, port = pod_hostport
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(pod_ip, username=self.ssh_user,
-                       key_filename=self.ssh_key_path, timeout=60)
+        client.connect(host, port=port, username=self.ssh_user,
+                        key_filename=self.ssh_key_path, timeout=60)
         sftp = client.open_sftp()
         try:
             sftp.put(local, remote)
@@ -124,33 +134,23 @@ class RunPodRunner:
                      setup_cmds: list[str] | None = None) -> str:
         """Full lifecycle: submit → [upload] → [setup] → ssh train → download → terminate.
         If ``pre_train_upload`` is provided, each ``(local, remote)`` pair is
-        SFTP-put to the pod after submit + IP resolution and before training.
-        If ``setup_cmds`` is provided, each is SSH-exec'd in order after upload
-        and before the train command (e.g. ``pip install kraken``).
+        SFTP'd to the pod before ``setup_cmds`` run.
+        If ``setup_cmds`` is provided, each is run via SSH before training.
         Returns the local artifact path."""
         pod_id = self.submit_pod(name)
         keep_pod_for_recovery = False
         try:
-            # ponytail: RunPod assigns the pod an IP after boot; poll for it briefly.
-            pod_ip = None
-            for _ in range(60):
-                pod = runpod.get_pod(pod_id)
-                pod_ip = pod.get("runtime", {}).get("ip") if isinstance(pod, dict) else None
-                if pod_ip:
-                    break
-                time.sleep(10)
-            if not pod_ip:
-                raise RuntimeError(f"pod {pod_id} never got an IP")
+            pod_hostport = self._ssh_endpoint(pod_id)
             if pre_train_upload:
                 for local, remote in pre_train_upload:
-                    self.upload_artifact(local, pod_ip, remote)
-            self.ssh_exec(pod_ip, ["mkdir", "-p", str(Path(artifact_remote_path).parent)])
+                    self.upload_artifact(local, pod_hostport, remote)
+            self.ssh_exec(pod_hostport, ["mkdir", "-p", str(Path(artifact_remote_path).parent)])
             if setup_cmds:
                 for cmd_str in setup_cmds:
-                    self.ssh_exec(pod_ip, shlex.split(cmd_str), timeout=600)
-            self.ssh_exec(pod_ip, train_cmd, timeout=poll_timeout)
+                    self.ssh_exec(pod_hostport, shlex.split(cmd_str), timeout=600)
+            self.ssh_exec(pod_hostport, train_cmd, timeout=poll_timeout)
             keep_pod_for_recovery = True
-            self.download_artifact(pod_ip, artifact_remote_path, artifact_local_path)
+            self.download_artifact(pod_hostport, artifact_remote_path, artifact_local_path)
             keep_pod_for_recovery = False
             return artifact_local_path
         finally:

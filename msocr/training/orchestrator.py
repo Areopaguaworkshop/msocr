@@ -115,7 +115,7 @@ def walk_style_group(
     """
     if setup_cmds is None:
         setup_cmds = [
-            "uv pip install --system 'kraken>=7.0.2'",
+            "python3 -m pip install --quiet 'kraken>=7.0.2'",
             _KRAKEN_CHECKPOINT_PATCH,
         ]
     manifest = load_frozen_manifest(manifest_path)

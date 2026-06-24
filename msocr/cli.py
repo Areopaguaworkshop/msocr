@@ -695,7 +695,7 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
     # The patch is idempotent and required for from-scratch training.
     if not setup_cmds:
         from msocr.training.orchestrator import _KRAKEN_CHECKPOINT_PATCH
-        setup_cmds = ["uv pip install --system 'kraken>=7.0.2'", _KRAKEN_CHECKPOINT_PATCH]
+        setup_cmds = ["python3 -m pip install --quiet 'kraken>=7.0.2'", _KRAKEN_CHECKPOINT_PATCH]
 
     runner = RunPodRunner(
         api_key=api_key,

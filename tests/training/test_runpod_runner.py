@@ -23,10 +23,44 @@ def test_submit_pod_uses_runpod_create_pod_with_image_and_gpu(monkeypatch):
     assert pod_id == "pod-123"
 
 
-def test_ssh_ketos_train_runs_the_right_command(monkeypatch):
-    """SSH exec runs the 7.0 ketos train command with global flags."""
+def test_ssh_endpoint_polls_until_runtime_ports_has_public_22(monkeypatch):
+    """_ssh_endpoint polls get_pod until runtime.ports has a public entry for port 22."""
+    fake_runpod = MagicMock()
+    # First: runtime None. Second: ports empty. Third: SSH port appears.
+    fake_runpod.get_pod.side_effect = [
+        {"id": "p", "runtime": None},
+        {"id": "p", "runtime": {"ports": []}},
+        {"id": "p", "runtime": {"ports": [
+            {"privatePort": 22, "isIpPublic": True, "ip": "1.2.3.4", "publicPort": 17445},
+        ]}},
+    ]
+    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
+    monkeypatch.setattr("time.sleep", lambda *a: None)
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    host, port = runner._ssh_endpoint("p", deadline_s=60)
+    assert host == "1.2.3.4"
+    assert port == 17445
+    assert fake_runpod.get_pod.call_count == 3
+
+
+def test_ssh_endpoint_raises_when_no_public_port(monkeypatch):
+    """If runtime.ports never exposes a public port 22, raise RuntimeError."""
+    fake_runpod = MagicMock()
+    fake_runpod.get_pod.return_value = {"id": "p", "runtime": None}
+    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
+    monkeypatch.setattr("time.sleep", lambda *a: None)
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    with pytest.raises(RuntimeError, match="never exposed a public SSH port"):
+        runner._ssh_endpoint("p", deadline_s=1)
+
+
+def test_ssh_exec_connects_with_host_and_port(monkeypatch):
+    """ssh_exec passes (host, port) to paramiko connect."""
     fake_paramiko = MagicMock()
-    # Mock SSHClient.connect, exec_command, return stdout/stderr/exit_status
     fake_stdout = MagicMock()
     fake_stdout.channel.recv_exit_status.return_value = 0
     fake_stderr = MagicMock()
@@ -38,40 +72,20 @@ def test_ssh_ketos_train_runs_the_right_command(monkeypatch):
 
     runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
                           ssh_key_path="/tmp/id_ed25519")
-    cmd = ["ketos", "-d", "cuda:0", "--workers", "8", "train",
-           "--load", "base.safetensors", "--resize", "union",
-           "--freeze-backbone", "5000", "--augment",
-           "-f", "binary", "-t", "train.arrow", "-e", "val.arrow",
-           "-o", "/workspace/models/manichaean-early"]
-    runner.ssh_exec(pod_ip="1.2.3.4", cmd=cmd)
+    runner.ssh_exec(("1.2.3.4", 17445), ["ketos", "train"])
 
-    # Verify SSHClient.connect was called with the pod IP and the SSH key
-    # Verify exec_command was called with the joined command string
-    fake_paramiko.SSHClient.return_value.exec_command.assert_called_once()
-
-
-def test_poll_until_done_returns_when_pod_exited(monkeypatch):
-    fake_runpod = MagicMock()
-    # First call: still running. Second call: exited.
-    fake_runpod.get_pod.side_effect = [
-        {"status": "RUNNING"},
-        {"status": "EXITED", "runtime": {"exitCode": 0}},
-    ]
-    monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
-    monkeypatch.setattr("time.sleep", lambda *a: None)
-
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
-    exit_code = runner.poll_until_done(pod_id="pod-123", timeout=3600, interval=30)
-    assert exit_code == 0
-    assert fake_runpod.get_pod.call_count == 2
+    fake_client = fake_paramiko.SSHClient.return_value
+    fake_client.connect.assert_called_once()
+    args, kwargs = fake_client.connect.call_args
+    assert args[0] == "1.2.3.4"
+    assert kwargs["port"] == 17445
+    fake_client.exec_command.assert_called_once()
 
 
 def test_download_artifact_does_not_terminate_pod_on_failure(monkeypatch):
     """If scp fails, the pod is NOT terminated (so the artifact survives for manual recovery)."""
     fake_runpod = MagicMock()
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
-    # paramiko SSHClient scp raises
     fake_paramiko = MagicMock()
     fake_paramiko.SSHClient.return_value.open_sftp.side_effect = Exception("scp fail")
     monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
@@ -79,9 +93,9 @@ def test_download_artifact_does_not_terminate_pod_on_failure(monkeypatch):
     runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
                           ssh_key_path="/tmp/id_ed25519")
     with pytest.raises(Exception, match="scp fail"):
-        runner.download_artifact(pod_ip="1.2.3.4", remote="/workspace/out.safetensors",
-                                   local="/tmp/out.safetensors")
-    fake_runpod.terminate_pod.assert_not_called()  # key assertion
+        runner.download_artifact(("1.2.3.4", 17445), "/workspace/out.safetensors",
+                                  "/tmp/out.safetensors")
+    fake_runpod.terminate_pod.assert_not_called()
 
 
 def test_upload_artifact_calls_sftp_put_with_local_and_remote(monkeypatch):
@@ -93,8 +107,8 @@ def test_upload_artifact_calls_sftp_put_with_local_and_remote(monkeypatch):
 
     runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
                           ssh_key_path="/tmp/id_ed25519")
-    runner.upload_artifact(local="/tmp/train.arrow", pod_ip="1.2.3.4",
-                           remote="/workspace/train.arrow")
+    runner.upload_artifact("/tmp/train.arrow", ("1.2.3.4", 17445),
+                            "/workspace/train.arrow")
 
     fake_paramiko.SSHClient.return_value.open_sftp.return_value.put.assert_called_once_with(
         "/tmp/train.arrow", "/workspace/train.arrow"
@@ -112,24 +126,23 @@ def test_upload_artifact_does_not_terminate_pod_on_failure(monkeypatch):
     runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
                           ssh_key_path="/tmp/id_ed25519")
     with pytest.raises(Exception, match="put fail"):
-        runner.upload_artifact(local="/tmp/train.arrow", pod_ip="1.2.3.4",
-                               remote="/workspace/train.arrow")
-    fake_runpod.terminate_pod.assert_not_called()  # key assertion
+        runner.upload_artifact("/tmp/train.arrow", ("1.2.3.4", 17445),
+                                "/workspace/train.arrow")
+    fake_runpod.terminate_pod.assert_not_called()
 
 
-def test_run_training_ssh_execs_downloads_and_terminates_without_waiting_for_pod_exit(monkeypatch):
-    """SSH training is synchronous; the pod stays running until we download and terminate it."""
+def test_run_training_full_lifecycle(monkeypatch):
+    """submit → upload → mkdir → setup → train → download → terminate."""
     fake_runpod = MagicMock()
     fake_runpod.create_pod.return_value = {"id": "pod-123"}
-    fake_runpod.get_pod.return_value = {"runtime": {"ip": "1.2.3.4"}, "status": "RUNNING"}
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
 
     runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
                           ssh_key_path="/tmp/id_ed25519")
+    runner._ssh_endpoint = MagicMock(return_value=("1.2.3.4", 17445))
     runner.upload_artifact = MagicMock()
     runner.ssh_exec = MagicMock(return_value="ok")
     runner.download_artifact = MagicMock()
-    runner.poll_until_done = MagicMock()
 
     result = runner.run_training(
         name="train",
@@ -137,16 +150,20 @@ def test_run_training_ssh_execs_downloads_and_terminates_without_waiting_for_pod
         artifact_remote_path="/workspace/models/out.safetensors",
         artifact_local_path="/tmp/out.safetensors",
         pre_train_upload=[("/tmp/train.arrow", "/workspace/train.arrow")],
+        setup_cmds=["pip install kraken"],
     )
 
     assert result == "/tmp/out.safetensors"
-    runner.poll_until_done.assert_not_called()
+    runner.upload_artifact.assert_called_once_with(
+        "/tmp/train.arrow", ("1.2.3.4", 17445), "/workspace/train.arrow"
+    )
     runner.ssh_exec.assert_has_calls([
-        call("1.2.3.4", ["mkdir", "-p", "/workspace/models"]),
-        call("1.2.3.4", ["ketos", "train"], timeout=7200),
+        call(("1.2.3.4", 17445), ["mkdir", "-p", "/workspace/models"]),
+        call(("1.2.3.4", 17445), ["pip", "install", "kraken"], timeout=600),
+        call(("1.2.3.4", 17445), ["ketos", "train"], timeout=7200),
     ])
     runner.download_artifact.assert_called_once_with(
-        "1.2.3.4", "/workspace/models/out.safetensors", "/tmp/out.safetensors"
+        ("1.2.3.4", 17445), "/workspace/models/out.safetensors", "/tmp/out.safetensors"
     )
     fake_runpod.terminate_pod.assert_called_once_with("pod-123")
 
@@ -155,11 +172,11 @@ def test_run_training_leaves_pod_running_when_download_fails(monkeypatch):
     """If artifact download fails after training, keep the pod alive for manual recovery."""
     fake_runpod = MagicMock()
     fake_runpod.create_pod.return_value = {"id": "pod-123"}
-    fake_runpod.get_pod.return_value = {"runtime": {"ip": "1.2.3.4"}, "status": "RUNNING"}
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
 
     runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
                           ssh_key_path="/tmp/id_ed25519")
+    runner._ssh_endpoint = MagicMock(return_value=("1.2.3.4", 17445))
     runner.ssh_exec = MagicMock(return_value="ok")
     runner.download_artifact = MagicMock(side_effect=Exception("download fail"))
 
