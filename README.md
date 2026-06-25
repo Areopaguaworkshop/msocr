@@ -9,11 +9,27 @@ Active scope (remote training): RunPod GPU Cloud Pod submission for `ketos train
 
 Removed scope: printed OCR routing, Tesseract/OCRmyPDF fallbacks, benchmark promotion flows, artifact registry publication, and multi-language orchestration.
 
+## Recent Developments
+
+Active work has shifted toward **Christian Sogdian** manuscripts (Sogdian language written in the East Syriac script, Unicode block `U+0710`) sourced from the Sims-Williams 1985 C2AV Berlin plates. Recent changes:
+
+- **Christian Sogdian manifests** under `data/manifests/`: `christian-sogdian-c2av.json` (canonical, growing plate set) plus two single-page smoke manifests (`e57d259b-smoke.json`, `christian-sogdian-c2av-image19-smoke.json`). Style group `christian-syriac-script-c2av` targets fine-tuning from a Syriac base model (`models/kraken/sophro_mhiro_syriac.mlmodel`).
+- **Fragment-handling CLI pipeline** for damaged/fragmentary manuscripts: `msocr isolate-fragments` (Sauvola + connected components + DBSCAN), `binarize-fragments` (per-fragment Sauvola/NLbin with bleed-through detection), `deskew-fragments` (Hough deskew on binary masks), and `extract-lines` (exact-count row-band cropping with optional ROI / row-centers). See `docs/kraken-fragmentary-manuscripts.md`.
+- **Annotation UI rewrite**: the browser UI moved from HTMX/Alpine to a React SPA (OpenSeadragon viewer + Phosphor icons, Sogdian Latin-transliteration palette). The SPA bundle lives in `frontend/dist/` and is served by the annotation API. Build it with `cd frontend && npm install && npm run build`. `msocr annotate`, `annotation-api`, and `demo` all refuse to start if `frontend/dist/index.html` is missing.
+- **`msocr demo`** now launches the annotation API + React SPA on port 8001 (default). The legacy Gradio demo is dead code; `--share` is a silent no-op.
+- **`--no-crop-manuscript-area`** flag on `annotate`, `annotation-api`, and `demo` disables automatic manuscript-area cropping before line segmentation.
+- **RunPod runner hardened**: discovers the public SSH host:port from `runtime.ports` (RunPod exposes SSH on a random public port), relies on account-level SSH key injection (no per-pod env var), reduced default pod disk to 50 GB.
+- **Orchestrator polygon enrichment**: kraken 7.x requires `<Coords>` per `<TextLine>`, but the annotation exporter only emits `<Baseline>`. The orchestrator now computes polygonal `<Coords>` via `calculate_polygonal_environment` before upload, and applies an idempotent in-process patch for a kraken 7.0.2 checkpoint-save crash (`self.net is None`).
+- **Evaluation harness**: parses kraken 7.0.2's percentage-format Character/Word Accuracy output (in addition to legacy `CER:`/`WER:` labels) and enriches baseline-only holdout XMLs into temp polygon XMLs before `ketos test`.
+- **New docs**: `docs/kraken-fragmentary-manuscripts.md`, `docs/kraken-training-data-research.md`, `docs/multi-script-htr-research.md`, `docs/runpod-gpu-research.md`, `docs/codeql-scan.md`, `docs/semgrep-scan.md`.
+
 ## Supported Language
 
 | Code | Alias | Direction | Runtime font | Default model |
 |---|---|---|---|---|
 | `sogdian` | `old_sogdian` | RTL | Noto Sans Sogdian | `models/kraken/sogdian_manuscript.mlmodel` |
+
+The registry stays Sogdian-only, but manifests carry a `script_block` (`U+10F30` Sogdian or `U+0710` Syriac) plus an optional `script_variant` (e.g. `christian-syriac-script`) so Christian Sogdian — Sogdian language in East Syriac script — trains and evaluates from a Syriac base model rather than the Sogdian default.
 
 ## Installation
 
@@ -71,6 +87,27 @@ uv run msocr preprocess --input-dir data/sogdian/images
 
 Processed images are written to `data/sogdian/images/processed`.
 
+### Handle fragmentary manuscripts
+
+For damaged manuscripts with detached/rotated fragments, run the three-phase pipeline. Phase 1 isolates fragments (Sauvola + connected components + DBSCAN), Phase 2 binarizes each (Savola or NLbin with bleed-through detection), Phase 3 deskews each via Hough on the binary mask:
+
+```bash
+uv run msocr isolate-fragments path/to/page.tif --output-dir tmp/phase1_fragments/
+uv run msocr binarize-fragments path/to/page.tif \
+  --fragments-json tmp/phase1_fragments/fragments.json --output-dir tmp/phase2_binarized/
+uv run msocr deskew-fragments path/to/page.tif \
+  --fragments-json tmp/phase1_fragments/fragments.json \
+  --binarized-dir tmp/phase2_binarized/ --output-dir tmp/phase3_deskewed/
+```
+
+To crop exact-count row bands from a page (with optional ROI and manual row centers):
+
+```bash
+uv run msocr extract-lines path/to/page.tif --expected-lines 18 --output-dir tmp/lines/
+```
+
+See `docs/kraken-fragmentary-manuscripts.md` for the full pipeline rationale.
+
 ### Run the API
 
 ```bash
@@ -109,20 +146,32 @@ uv run msocr runtime-smoke-check \
   --require-engine kraken
 ```
 
-### Run the Gradio demo
+### Run the annotation UI (demo)
+
+`msocr demo` now serves the annotation API + React SPA (the Gradio demo is gone):
 
 ```bash
-export MSOCR_HTR_RUNTIME_MODEL_PATH=models/kraken/sogdian_manuscript.mlmodel
-uv run msocr demo --host 127.0.0.1 --port 7860
+uv run msocr demo --host 127.0.0.1 --port 8001
+# → http://127.0.0.1:8001/
 ```
+
+Requires the built SPA: `cd frontend && npm install && npm run build`.
 
 ### Run the annotation API
 
-The annotation API stores Sogdian ground-truth sessions, page images, line crops, and annotations.
+The annotation API stores Sogdian ground-truth sessions, page images, line crops, and annotations, and serves the React annotation SPA from `frontend/dist/`.
 
 ```bash
 uv run msocr annotation-api --host 127.0.0.1 --port 8001 --base-dir msocr/data
 ```
+
+If `frontend/dist/index.html` is missing, build the SPA first:
+
+```bash
+cd frontend && npm install && npm run build
+```
+
+Add `--no-crop-manuscript-area` to disable auto-detection and cropping of the manuscript area before line segmentation.
 
 Exports supported by annotation sessions:
 
@@ -132,14 +181,14 @@ Exports supported by annotation sessions:
 
 ### Annotate via the browser UI
 
-`msocr annotate` starts the annotation API and prints the `/ui` URL (HTMX + Alpine.js, no build step, vendored JS):
+`msocr annotate` starts the annotation API and prints the direct UI URL (React SPA; OpenSeadragon viewer, RTL line view, Sogdian Latin-transliteration palette):
 
 ```bash
 uv run msocr annotate --host 127.0.0.1 --port 8001 --base-dir msocr/data
-# → Annotation UI: http://127.0.0.1:8001/ui
+# → Annotation UI: http://127.0.0.1:8001/ui/{session_id}
 ```
 
-Open `/plan` for the design doc view; `/ui/{session_id}/{line_n}` for the RTL line annotation view with the Sogdian Unicode palette.
+It does not auto-open a browser (flaky in headless/Docker/SSH) — click the printed URL.
 
 ### Train a style-group on a RunPod GPU Cloud Pod
 
@@ -212,13 +261,61 @@ uv run msocr evaluate --manifest PATH --style-group ID --model PATH --reports-di
 
 Runs `ketos test` over a style-group's holdout partition, writes JSON + Markdown benchmark report. Thin wrapper — no invented metrics, reuses what `ketos test` reports.
 
+### `demo`
+
+```bash
+uv run msocr demo [--host HOST] [--port PORT] [--share]
+```
+
+Launches the annotation API + React SPA (legacy Gradio demo removed; `--share` is a silent no-op). Requires `frontend/dist/index.html` — build it first with `cd frontend && npm install && npm run build`. Default port `8001`.
+
 ### `annotate`
 
 ```bash
-uv run msocr annotate [--host HOST] [--port PORT] [--base-dir DIR]
+uv run msocr annotate [--host HOST] [--port PORT] [--base-dir DIR] [--no-crop-manuscript-area]
 ```
 
-Starts the annotation API (port 8001) and prints the `/ui` URL. Defaults: `127.0.0.1:8001`, base-dir `.`. Does not auto-open a browser (flaky in headless/Docker/SSH) — click the printed URL.
+Starts the annotation API (port 8001) and prints a direct `/ui/{session_id}` URL. Defaults: `127.0.0.1:8001`, base-dir `.`. Requires the built React SPA in `frontend/dist/`. Does not auto-open a browser (flaky in headless/Docker/SSH) — click the printed URL.
+
+### `annotation-api`
+
+```bash
+uv run msocr annotation-api [--host HOST] [--port PORT] [--base-dir DIR] [--no-crop-manuscript-area]
+```
+
+Same annotation API as `annotate`, minus the URL hint. Default base-dir `msocr/data`.
+
+### `extract-lines`
+
+```bash
+uv run msocr extract-lines IMAGE --expected-lines N --output-dir DIR [--roi L,T,R,B] [--row-centers Y,Y,...] [--min-component-area N]
+```
+
+Crops exactly N row-band line images from a page (with QA overlay + contact sheet).
+
+### `isolate-fragments`
+
+```bash
+uv run msocr isolate-fragments IMAGE [--output-dir DIR] [--sauvola-window N] [--min-component-area N] [--min-fragment-area N] [--dbscan-eps N]
+```
+
+Phase 1 of the fragmentary-manuscript pipeline. Writes `fragments.json`, per-fragment PNGs, and an overlay JPG.
+
+### `binarize-fragments`
+
+```bash
+uv run msocr binarize-fragments IMAGE --fragments-json PATH [--output-dir DIR] [--sauvola-window N]
+```
+
+Phase 2: per-fragment binarization (Sauvola or NLbin, auto-selected by bleed-through detection). Writes `{fragment_id}_mask.png` and `_compare.jpg`.
+
+### `deskew-fragments`
+
+```bash
+uv run msocr deskew-fragments IMAGE --fragments-json PATH [--binarized-dir DIR] [--output-dir DIR]
+```
+
+Phase 3: per-fragment Hough deskew using Phase 2 masks. Writes deskewed crops plus `deskew_angles.json`.
 
 ### `runtime-smoke-check`
 
@@ -282,20 +379,39 @@ msocr/
 ├── language_registry.py
 ├── models/inference.py
 ├── output/formats.py
-├── preprocessing/preprocessor.py
+├── preprocessing/
+│   ├── preprocessor.py
+│   ├── binarize.py        # Sauvola / NLbin with bleed-through detection
+│   └── deskew.py          # per-fragment Hough deskew
 ├── segmentation/
+│   ├── fragment_isolation.py  # Sauvola + CC + DBSCAN
+│   └── row_bands.py           # exact-count line-band extraction
 ├── service/
 │   ├── api.py
-│   ├── annotation_api.py
-│   ├── annotation_ui/        # vendored htmx+alpine + Jinja2 templates
+│   ├── annotation_api.py     # serves React SPA from frontend/dist/
 │   ├── deploy.py
-│   ├── gradio_demo.py
 │   └── runtime.py
 ├── training/
 │   ├── ketos_trainer.py
-│   ├── orchestrator.py       # procedural per-style-group walker
-│   └── runpod_runner.py      # RunPod GPU Cloud Pod runner
+│   ├── orchestrator.py       # polygon enrichment + per-style-group walker
+│   └── runpod_runner.py      # RunPod SSH host:port discovery
 └── utils/
+frontend/                       # React + OpenSeadragon annotation SPA
+├── src/{AnnotateEditor,PlateGallery,SessionList,App,types}.tsx
+└── dist/                      # build output, served by annotation-api
+data/manifests/
+├── berlin-turfan-sogdian-v1.json         # schema-only
+├── christian-sogdian-c2av.json           # canonical Christian Sogdian manifest
+├── christian-sogdian-c2av-image19-smoke.json
+└── e57d259b-smoke.json
+docs/
+├── runpod.md                              # RunPod runbook
+├── kraken-fragmentary-manuscripts.md      # fragment pipeline rationale
+├── kraken-training-data-research.md
+├── multi-script-htr-research.md
+├── runpod-gpu-research.md
+├── codeql-scan.md  semgrep-scan.md
+└── plans/
 ```
 
 Remote training artifacts:
@@ -303,6 +419,7 @@ Remote training artifacts:
 - `Dockerfile.train` — RunPod pod image (python:3.12-slim + uv + kraken 7.0)
 - `docs/runpod.md` — runbook for `msocr train-remote`
 - `data/manifests/berlin-turfan-{sogdian,syriac}-v1.json` — schema-only manifests (contents filled during data collection)
+- `data/manifests/christian-sogdian-c2av*.json` — Christian Sogdian (East Syriac script) manifests, real and smoke variants
 
 ## Tests
 
@@ -320,11 +437,12 @@ uv run pytest tests/data/test_manifest.py tests/data/test_session_manager.py
 ## Notes
 
 - All runtime recognition is Kraken HTR.
-- Sogdian is the only supported language in the registry and CLI choices. Two script blocks are tracked for training: Sogdian `U+10F30` and Syriac `U+0710`.
+- Sogdian is the only supported language in the registry and CLI choices. Two script blocks are tracked for training: Sogdian `U+10F30` and Syriac `U+0710` (Christian Sogdian uses the latter).
 - Remote training uses RunPod GPU Cloud Pods via `msocr train-remote`; evaluation wraps `ketos test` (no invented metrics).
 - JSON and Markdown are the only HTR output formats.
 - PDF input is rendered to images before HTR; searchable PDF output is intentionally not part of this focused runtime.
-- `models/` and generated `output/` artifacts are gitignored.
+- The annotation UI is a React SPA under `frontend/`; build it (`cd frontend && npm install && npm run build`) before running `annotate`, `annotation-api`, or `demo`.
+- `models/`, generated `output/` artifacts, and `msocr/data/sessions/` (local annotation sessions) are gitignored.
 
 ## License
 
