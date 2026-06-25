@@ -1208,8 +1208,8 @@
             1590
           ],
           [
-            834,
-            1621
+            892,
+            1593
           ],
           [
             967,
@@ -1264,16 +1264,16 @@
             735
           ],
           [
-            682,
-            1560
+            457,
+            946
           ],
           [
-            533,
-            903
+            544,
+            1072
           ],
           [
-            594,
-            1015
+            623,
+            1539
           ]
         ],
         "type": "MainZone"
@@ -1389,7 +1389,280 @@
         "type": "MainZone"
       }
     ],
-    "lines": []
+    "lines": [
+      {
+        "id": "l1782382407211",
+        "baseline": [
+          [
+            1407,
+            2992
+          ],
+          [
+            2178,
+            3068
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "zynbrt sʾ. prywd ʾt šy"
+      },
+      {
+        "id": "l1782382514792",
+        "baseline": [
+          [
+            1683,
+            2895
+          ],
+          [
+            1883,
+            2932
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "ʾt pr zʾy"
+      },
+      {
+        "id": "l1782382609773",
+        "baseline": [
+          [
+            1596,
+            2782
+          ],
+          [
+            2065,
+            2840
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "cʾnw swqʾz xw"
+      },
+      {
+        "id": "l1782382736457",
+        "baseline": [
+          [
+            1391,
+            2685
+          ],
+          [
+            2060,
+            2727
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "pr mwγʾnc dyn yty nyx"
+      },
+      {
+        "id": "l1782382879661",
+        "baseline": [
+          [
+            1313,
+            2543
+          ],
+          [
+            2091,
+            2625
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "xyl wyny ptry mwγyšty nb"
+      },
+      {
+        "id": "l1782382970240",
+        "baseline": [
+          [
+            1395,
+            2456
+          ],
+          [
+            1787,
+            2496
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "ywtr cn wyšnty"
+      },
+      {
+        "id": "l1782383113108",
+        "baseline": [
+          [
+            386,
+            1956
+          ],
+          [
+            517,
+            1958
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "mʾt"
+      },
+      {
+        "id": "l1782383217110",
+        "baseline": [
+          [
+            734,
+            1718
+          ],
+          [
+            1050,
+            1740
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "yw dyxw m"
+      },
+      {
+        "id": "l1782383285316",
+        "baseline": [
+          [
+            384,
+            1462
+          ],
+          [
+            578,
+            1491
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "wšywny"
+      },
+      {
+        "id": "l1782383319772",
+        "baseline": [
+          [
+            329,
+            1353
+          ],
+          [
+            499,
+            1358
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "pydʾr"
+      },
+      {
+        "id": "l1782383341250",
+        "baseline": [
+          [
+            337,
+            1252
+          ],
+          [
+            529,
+            1269
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "ty mʾt"
+      },
+      {
+        "id": "l1782383364563",
+        "baseline": [
+          [
+            348,
+            1124
+          ],
+          [
+            458,
+            1134
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "dn"
+      },
+      {
+        "id": "l1782383425145",
+        "baseline": [
+          [
+            1939,
+            1350
+          ],
+          [
+            2178,
+            1342
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "pswqpy"
+      },
+      {
+        "id": "l1782383454415",
+        "baseline": [
+          [
+            1962,
+            1233
+          ],
+          [
+            2163,
+            1223
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "wysʾq"
+      },
+      {
+        "id": "l1782383519228",
+        "baseline": [
+          [
+            1675,
+            1027
+          ],
+          [
+            2098,
+            1033
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "d xw qy xšyʾ"
+      },
+      {
+        "id": "l1782383583803",
+        "baseline": [
+          [
+            1643,
+            915
+          ],
+          [
+            1919,
+            928
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "ptšmʾr pr"
+      },
+      {
+        "id": "l1782383648383",
+        "baseline": [
+          [
+            1668,
+            808
+          ],
+          [
+            1760,
+            810
+          ]
+        ],
+        "boundary": [],
+        "type": "DefaultLine",
+        "transcript": "zʾt"
+      }
+    ]
   },
   "ingestion_path": "local_file",
   "source": "dataset/christian_sogdian_c2av/plates/p-01.png",
@@ -1400,5 +1673,5 @@
     117
   ],
   "created_at": "2026-06-24T17:48:19.562765",
-  "updated_at": "2026-06-24T18:48:49.402098"
+  "updated_at": "2026-06-25T11:34:51.680056"
 }

@@ -146,6 +146,9 @@ test/
 # Planning and development artifacts
 .swarm/
 .planning/
+
+# Annotation session data (local working files)
+msocr/data/sessions/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
 
