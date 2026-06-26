@@ -102,3 +102,25 @@ def test_get_training_command_dry_run_does_not_execute(monkeypatch):
     assert called == []  # no subprocess.run call
     assert cmd[0] == "ketos"
     assert "train" in cmd
+
+
+def test_normalization_under_model_section_passes_through():
+    """Config puts normalization under model: (about the script), ketos_trainer must still pass --normalization.
+    Regression: ketos_trainer.py:94 used to read normalization only from training_cfg, so it was silently dropped.
+    """
+    config = _base_config()
+    config["model"]["normalization"] = "NFD"
+    trainer = KetosTrainer(config)
+    flags = trainer._train_subcmd_flags("train.arrow", "eval.arrow")
+    assert "--normalization" in flags
+    assert flags[flags.index("--normalization") + 1] == "NFD"
+
+
+def test_normalization_under_training_section_passes_through():
+    """Docstring schema puts normalization under training:; that path must also work."""
+    config = _base_config()
+    config["training"]["normalization"] = "NFD"
+    trainer = KetosTrainer(config)
+    flags = trainer._train_subcmd_flags("train.arrow", "eval.arrow")
+    assert "--normalization" in flags
+    assert flags[flags.index("--normalization") + 1] == "NFD"

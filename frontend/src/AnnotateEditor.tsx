@@ -9,6 +9,7 @@ import {
   TextAUnderline,
   Trash,
   DownloadSimple,
+  FileArrowUp,
   FloppyDisk,
   Path as PathIcon,
   Question,
@@ -102,6 +103,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   const viewerElRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dragIndexRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [mode, setMode] = useState<Mode>("navigate");
   const [regionType, setRegionType] = useState<RegionType>("MainZone");
@@ -344,6 +346,68 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       setStatus("save failed");
     }
   }, [sessionId, regions, lines, booted]);
+
+  const handleImportXml = useCallback(async () => {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) return;
+    if (!window.confirm("Importing XML will REPLACE the current regions and lines on this page. Continue?")) {
+      // Reset the input so the same file can be re-selected later.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    setStatus("importing…");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`/api/sessions/${sessionId}/import-xml`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("import-xml failed:", text);
+        setStatus("import failed");
+        return;
+      }
+      const body = await res.json();
+      // Reload annotations from server to get the canonical state.
+      const reloadRes = await fetch(`/api/sessions/${sessionId}/annotations`);
+      if (!reloadRes.ok) {
+        setStatus("import failed — could not reload");
+        return;
+      }
+      const saved: AnnotationState = await reloadRes.json();
+      const nextRegions = saved.regions ?? [];
+      const nextLines = saved.lines ?? [];
+      setRegions(
+        nextRegions
+          .map((r, i) => ({
+            id: r.id || `r${i + 1}`,
+            polygon: (r.polygon || []).map(normalizePoint),
+            type: (REGION_COLORS[r.type as RegionType] ? r.type : "MainZone") as RegionType,
+          }))
+          .filter((r) => r.polygon.length >= 3),
+      );
+      setLines(
+        nextLines
+          .map((l, i) => ({
+            id: l.id || `l${i + 1}`,
+            baseline: (l.baseline || []).map(normalizePoint),
+            boundary: (l.boundary || []).map(normalizePoint),
+            type: (LINE_COLORS[l.type as LineType] ? l.type : "DefaultLine") as LineType,
+            transcript: l.transcript || "",
+          }))
+          .filter((l) => l.baseline.length >= 2),
+      );
+      setDirty(false);
+      setStatus(`imported ${body.regions ?? "?"} regions, ${body.lines ?? "?"} lines`);
+    } catch (err) {
+      console.error("import-xml error:", err);
+      setStatus("import failed");
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [sessionId]);
 
   // autosave: 2s debounce (not 30s — too laggy)
   useEffect(() => {
@@ -625,6 +689,19 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         >
           <FloppyDisk size={14} /> Save
         </button>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+        >
+          <FileArrowUp size={14} /> Import XML
+        </button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          accept=".xml,application/xml,text/xml"
+          className="hidden"
+          onChange={handleImportXml}
+        />
         <a
           href={`/api/sessions/${sessionId}/export?format=page`}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors"

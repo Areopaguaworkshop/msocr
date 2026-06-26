@@ -91,8 +91,11 @@ class KetosTrainer:
             flags += ["-B", str(t["batch_size"])]
         if t.get("augment"):
             flags += ["--augment"]
-        if "normalization" in t:
-            flags += ["--normalization", t["normalization"]]
+        # ponytail: normalization may live under training: (per docstring) or model: (where
+        # the config author put it, semantically about the script). Check both so either works.
+        norm = t.get("normalization") or self.model_cfg.get("normalization")
+        if norm:
+            flags += ["--normalization", norm]
         return flags
 
     def _output_prefix(self) -> str:

@@ -518,24 +518,38 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
         return {"status": "ok"}
 
     @app.post("/api/sessions/{session_id}/import-xml")
-    def import_xml(session_id: str, xml_path: str) -> Dict[str, Any]:
+    async def import_xml(
+        session_id: str,
+        xml_path: Optional[str] = None,
+        file: Optional[UploadFile] = None,
+    ) -> Dict[str, Any]:
         """Import v2 annotation state from a PAGE XML file (manual safety valve).
 
         The auto-import in get_session covers the canonical gt/{id}_page_*.xml
-        path. Use this endpoint when the XML is at a non-standard location.
-        Body/query: {"xml_path": "/abs/path/to.xml"} or ?xml_path=...
+        path. Use this endpoint when the XML is at a non-standard location or
+        uploaded from a browser.
+
+        Accepts EITHER:
+        - multipart file upload (field name ``file``), OR
+        - ``xml_path`` query/body string (kept for curl/back-compat)
         """
         session = manager.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        if not xml_path:
-            raise HTTPException(status_code=400, detail="xml_path required")
-        p = Path(xml_path)
-        if not p.is_absolute():
-            p = Path.cwd() / p
-        if not p.exists():
-            raise HTTPException(status_code=404, detail=f"XML not found: {p}")
-        updated = manager.import_v2_from_xml(session_id, p)
+        if file is not None:
+            xml_bytes = await file.read()
+            if not xml_bytes:
+                raise HTTPException(status_code=400, detail="empty file upload")
+            updated = manager.import_v2_from_xml_bytes(session_id, xml_bytes)
+        elif xml_path:
+            p = Path(xml_path)
+            if not p.is_absolute():
+                p = Path.cwd() / p
+            if not p.exists():
+                raise HTTPException(status_code=404, detail=f"XML not found: {p}")
+            updated = manager.import_v2_from_xml(session_id, p)
+        else:
+            raise HTTPException(status_code=400, detail="either file upload or xml_path required")
         if updated is None:
             raise HTTPException(status_code=422, detail="XML parsed but no regions/lines found")
         v2 = updated.annotations_v2 or {}

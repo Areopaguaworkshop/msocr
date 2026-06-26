@@ -12,7 +12,9 @@ model:
   spec: "[1,120,0,1 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]"
   
   # Normalization for Sogdian script
-  normalization: "NFC"  # Unicode normalization form
+  # ponytail: NFD decomposes diacritics (seyame, vowels, shewa) into separate CTC labels.
+  # NFC collapsed them — wrong for Syriac/Sogdian. See docs/kraken-training-techniques-research.md §7.1.
+  normalization: "NFD"
   
   # Script direction. Old Sogdian manuscript hands are treated as RTL in this project.
   base_dir: "R"
@@ -21,11 +23,18 @@ model:
 training:
   # Optimizer settings
   optimizer: "Adam"
-  learning_rate: 0.001
-  weight_decay: 0.0001
-  
+  # ponytail: 1e-4 for fine-tuning from sophro_mhiro_syriac base. 1e-3 is the from-scratch default;
+  # fine-tuning needs lower LR to avoid catastrophic forgetting. See research doc §2.1, §11.2.
+  # Key name is `lrate` to match ketos_trainer.py _train_subcmd_flags (was `learning_rate` — never read).
+  lrate: 0.0001
+  # ponytail: 0 for CTC recognition (Kraken rec default). Weight decay is for seg only (1e-5).
+  weight_decay: 0
+   
   # Training schedule
-  schedule: "1cycle"
+  # ponytail: cosine for fine-tuning (1cycle is for from-scratch). See research doc §2.2, §11.1.
+  schedule: "cosine"
+  # ponytail: warmup required with cosine fine-tune. 200 steps for similar-domain fine-tune.
+  warmup: 200
   epochs: 100
   min_epochs: 20
   lag: 10  # Early stopping patience
@@ -67,12 +76,16 @@ preprocessing:
     search_window_size: 21
   
   # Contrast enhancement
-  enhance_contrast: true
+  # ponytail: off — CLAHE not statistically beneficial per TrOCR ablation 2026 (arXiv:2606.24302).
+  # Kraken's --augment already covers lighting via OpticalDistortion + brightness. See research doc §4.3, §11.2.
+  enhance_contrast: false
   clahe_clip_limit: 2.0
   clahe_grid_size: [8, 8]
-  
+   
   # Binarization
-  binarize: true
+  # ponytail: off — Kraken reads grayscale; otsu binarization destroys faint ink.
+  # Damaged manuscripts suffer most. See research doc §9.3, §11.1.
+  binarize: false
   binarize_method: "otsu"
   blur_kernel_size: 5
 

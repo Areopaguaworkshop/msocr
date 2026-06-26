@@ -445,26 +445,23 @@ class SessionManager:
     # annotations_v2 is empty but a GT XML exists. Also used by the plate
     # gallery's create-session flow to skip re-segmentation when geometry
     # already exists in a GT XML.
-    def import_page_xml_to_v2(self, xml_path: Path) -> Optional[Dict[str, Any]]:
-        """Parse a PAGE XML file into v2 annotation state.
+    def parse_page_xml_to_v2(self, xml_bytes: bytes) -> Optional[Dict[str, Any]]:
+        """Parse raw PAGE XML bytes into v2 annotation state.
 
         Extracts regions (id + polygon + SegmOnto type) and lines (id +
-        baseline + boundary + type + transcript). Returns None if the file
-        can't be parsed or contains no regions/lines.
+        baseline + boundary + type + transcript). Returns None if the bytes
+        can't be parsed or contain no regions/lines.
 
         Args:
-            xml_path: Path to a PAGE XML file (kraken-compatible, 2019-07-15 schema)
+            xml_bytes: PAGE XML content as bytes (kraken-compatible, 2019-07-15 schema)
 
         Returns:
             {"regions": [...], "lines": [...]} or None
         """
-        if not xml_path.exists():
-            return None
         try:
             import xml.etree.ElementTree as ET
 
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
+            root = ET.fromstring(xml_bytes)
             ns = {"page": "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"}
 
             def _parse_points(pts_str: str) -> List[Tuple[int, int]]:
@@ -539,8 +536,18 @@ class SessionManager:
                 return None
             return {"regions": regions, "lines": lines}
         except Exception as e:
-            logger.error("Failed to import PAGE XML %s: %s", xml_path, e)
+            logger.error("Failed to parse PAGE XML: %s", e)
             return None
+
+    def import_page_xml_to_v2(self, xml_path: Path) -> Optional[Dict[str, Any]]:
+        """Parse a PAGE XML file into v2 annotation state.
+
+        Thin wrapper around ``parse_page_xml_to_v2`` that reads the file
+        from disk first. Returns None if the file is missing or unparseable.
+        """
+        if not xml_path.exists():
+            return None
+        return self.parse_page_xml_to_v2(xml_path.read_bytes())
 
     def import_v2_from_xml(self, session_id: str, xml_path: Path) -> Optional[AnnotationSession]:
         """Import v2 annotation state from a PAGE XML file into a session.
@@ -569,6 +576,35 @@ class SessionManager:
         logger.info(
             "Imported v2 state for session %s from %s: %d regions, %d lines",
             session_id, xml_path, len(v2["regions"]), len(v2["lines"]),
+        )
+        return session
+
+    def import_v2_from_xml_bytes(self, session_id: str, xml_bytes: bytes) -> Optional[AnnotationSession]:
+        """Import v2 annotation state from raw PAGE XML bytes into a session.
+
+        Mirrors ``import_v2_from_xml`` but takes XML content directly instead
+        of a filesystem path — for browser file uploads where the server has
+        no path to reference. Does NOT touch v1 annotations or segmented lines.
+
+        Args:
+            session_id: Target session
+            xml_bytes: PAGE XML content as bytes
+
+        Returns:
+            Updated session, or None if session/XML missing or empty
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        v2 = self.parse_page_xml_to_v2(xml_bytes)
+        if v2 is None:
+            return None
+        session.annotations_v2 = v2
+        session.updated_at = datetime.now().isoformat()
+        self._save_session(session)
+        logger.info(
+            "Imported v2 state for session %s from uploaded bytes: %d regions, %d lines",
+            session_id, len(v2["regions"]), len(v2["lines"]),
         )
         return session
 
