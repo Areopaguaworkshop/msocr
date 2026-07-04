@@ -693,11 +693,10 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             "Get one from https://console.runpod.io/tokens."
         )
 
-    # Default setup: install kraken + patch the 7.0.2 checkpoint bug.
-    # The patch is idempotent and required for from-scratch training.
-    if not setup_cmds:
-        from msocr.training.orchestrator import _KRAKEN_CHECKPOINT_PATCH
-        setup_cmds = ["python3 -m pip install --quiet 'kraken>=7.0.2'", _KRAKEN_CHECKPOINT_PATCH]
+    # Default setup_cmds come from walk_style_group (pip-install kraken +
+    # checkpoint patch + safetensors shared-tensor patch). Only override
+    # when the user passes --setup-cmd explicitly.
+    # (no local default — orchestrator owns it)
 
     ssh_key_path = os.path.expanduser(ssh_key)
     if not Path(ssh_key_path).is_file():
@@ -728,7 +727,7 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             device=device,
             workers=workers,
             quit_mode=quit_mode,
-            setup_cmds=list(setup_cmds),
+            setup_cmds=list(setup_cmds) if setup_cmds else None,
         )
     except (RuntimeError, TimeoutError, FileNotFoundError, KeyError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

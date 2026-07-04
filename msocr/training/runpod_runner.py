@@ -10,6 +10,8 @@ durable parallelism later, add RQ on top.
 from __future__ import annotations
 
 import os
+import sys
+import socket
 import time
 import shlex
 from pathlib import Path
@@ -86,13 +88,30 @@ class RunPodRunner:
                     raise
                 time.sleep(30)
         cmd_str = shlex.join(cmd)
-        stdin, stdout, stderr = client.exec_command(cmd_str, timeout=timeout)
-        exit_status = stdout.channel.recv_exit_status()
-        err_text = stderr.read().decode()
+        stdin, stdout, stderr = client.exec_command(cmd_str, timeout=timeout, get_pty=True)
+        # ponytail: get_pty=True forces a PTY so the remote shell sends EOF
+        # cleanly even for quiet commands (pip --quiet, mkdir). Without it,
+        # paramiko channels can hang in exit_status_ready() forever when the
+        # remote produces no output — observed hanging 2h+ on pip install.
+        # Stream stdout (which now carries stderr too via the PTY) line by
+        # line so long runs are observable.
+        chan = stdout.channel
+        chan.settimeout(timeout)
+        stdout_file = chan.makefile("rb", -1)
+        out_buf: list[str] = []
+        try:
+            for raw in iter(stdout_file.readline, b""):
+                line = raw.decode(errors="replace")
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                out_buf.append(line)
+        except socket.timeout:
+            raise RuntimeError(f"pod command timed out after {timeout}s: {cmd_str[:200]}")
+        exit_status = chan.recv_exit_status()
         client.close()
         if exit_status != 0:
-            raise RuntimeError(f"pod command failed (exit {exit_status}): {err_text[-2000:]}")
-        return stdout.read().decode()
+            raise RuntimeError(f"pod command failed (exit {exit_status}): {''.join(out_buf)[-2000:]}")
+        return "".join(out_buf)
 
     def download_artifact(self, pod_hostport: tuple[str, int], remote: str, local: str) -> None:
         """SCP a file from the pod to local. Does NOT terminate the pod on failure
@@ -142,23 +161,38 @@ class RunPodRunner:
         the score suffix is unknown until training ends, so we glob the dir
         and pick the (alphabetically) last ``best_*.safetensors`` — highest score.
         Returns the local artifact path."""
+        def _log(msg: str) -> None:
+            # ponytail: print stage transitions to stdout so long runs are
+            # observable. Without this the orchestrator is silent for 10+ min
+            # while pip-install runs on the pod, and a shell timeout orphans
+            # the pod (still billing) with no clue where it hung.
+            print(f"[runpod] {msg}", flush=True)
+
         stage = "creating RunPod pod"
+        _log(stage)
         pod_id = self.submit_pod(name)
+        _log(f"pod_id={pod_id}")
         keep_pod_for_recovery = False
         try:
             stage = "waiting for pod SSH endpoint"
+            _log(stage)
             pod_hostport = self._ssh_endpoint(pod_id)
+            _log(f"ssh endpoint = {pod_hostport[0]}:{pod_hostport[1]}")
             if pre_train_upload:
                 for local, remote in pre_train_upload:
                     stage = f"uploading {local} to {remote}"
+                    _log(stage)
                     self.upload_artifact(local, pod_hostport, remote)
             stage = f"creating remote artifact directory {artifact_remote_dir}"
+            _log(stage)
             self.ssh_exec(pod_hostport, ["mkdir", "-p", artifact_remote_dir])
             if setup_cmds:
                 for cmd_str in setup_cmds:
                     stage = f"running setup command: {cmd_str[:120]}"
-                    self.ssh_exec(pod_hostport, shlex.split(cmd_str), timeout=600)
+                    _log(stage)
+                    self.ssh_exec(pod_hostport, shlex.split(cmd_str), timeout=1800)
             stage = "running remote training command"
+            _log(stage + ": " + shlex.join(train_cmd))
             self.ssh_exec(pod_hostport, train_cmd, timeout=poll_timeout)
             keep_pod_for_recovery = True
             # ponytail: glob best_*.safetensors, sort desc, take first.

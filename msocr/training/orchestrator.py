@@ -35,6 +35,42 @@ for p, old, new, marker in [
 "
 """
 
+# ponytail: safetensors 0.7 refuses to load LSTM tied weights (weight_ih_l0
+# shared internally by VGSL) when no name in the shared group has "complete"
+# storage in the file. The converted sophro base hits this on ketos load.
+# Workaround from https://huggingface.co/docs/safetensors/torch_shared_tensors:
+# when complete_names is empty, fall back to the first name in the shared
+# group instead of raising. Source-file edit on the pod (same pattern as the
+# checkpoint patch). Idempotent via marker.
+_SAFETENSORS_SHARED_TENSOR_PATCH = r"""python3 -c "
+import safetensors.torch as st
+p = st.__file__
+s = open(p).read()
+marker = '# msocr-shared-tensor-patch'
+if marker not in s:
+    old = '''        if not complete_names:
+            raise RuntimeError(
+                \"Error while trying to find names to remove to save state dict, but found no suitable name to keep\"
+                f\" for saving amongst: {shared}. None is covering the entire storage.Refusing to save/load the model\"
+                \" since you could be storing much more memory than needed. Please refer to\"
+                \" https://huggingface.co/docs/safetensors/torch_shared_tensors for more information. Or open an\"
+                \" issue.\"
+            )
+
+        keep_name = sorted(list(complete_names))[0]'''
+    new = '''        if not complete_names:
+            # msocr-shared-tensor-patch: fall back to first name when no
+            # complete storage exists (VGSL LSTM tied weights on load).
+            keep_name = sorted(list(shared))[0]
+        else:
+            keep_name = sorted(list(complete_names))[0]'''
+    assert old in s, 'safetensors _remove_duplicate_names shape changed'
+    s = s.replace(old, new)
+    open(p, 'w').write(s)
+print('safetensors shared-tensor patch applied')
+"
+"""
+
 
 def _enrich_xml_with_polygons(src_xml: Path, image: Path, out_xml: Path, *, target_image_name: str | None = None) -> Path:
     """Compute <Coords> for each <TextLine> and write a new PAGE XML.
@@ -125,6 +161,7 @@ def walk_style_group(
         setup_cmds = [
             "python3 -m pip install --quiet 'kraken>=7.0.2'",
             _KRAKEN_CHECKPOINT_PATCH,
+            _SAFETENSORS_SHARED_TENSOR_PATCH,
         ]
     manifest = load_frozen_manifest(manifest_path)
     sg = (manifest.style_groups or {}).get(style_group_id) or {}
