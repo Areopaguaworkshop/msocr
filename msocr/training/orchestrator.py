@@ -145,6 +145,8 @@ def walk_style_group(
     lag: int = 10,
     freeze_backbone: int = 0,
     augment: bool = True,
+    warmup: int = 0,  # ponytail: 0 = off; research recommends 200 for fine-tuning stability.
+    lr: float | None = None,  # ponytail: None = ketos default (1e-3); 1e-4 recommended for small-data fine-tune.
     device: str = "auto",  # ponytail: ketos 7.0.2 crashes on `-d cuda`; auto lets pytorch pick the GPU.
     workers: int = 8,
     quit_mode: str = "fixed",
@@ -222,6 +224,8 @@ def walk_style_group(
             "ketos", "-d", device, "--workers", str(workers), "train",
             "--quit", quit_mode,
             "--epochs", str(epochs),
+            "--min-epochs", str(min_epochs),
+            "--lag", str(lag),
             "-f", "page",
             "-t", "/workspace/train_manifest.txt",
             "-e", "/workspace/val_manifest.txt",
@@ -230,11 +234,23 @@ def walk_style_group(
         if load_model_path:
             train_cmd += [
                 "--load", "/workspace/base.safetensors",
-                "--resize", "new",
+                # ponytail: kraken 7.0.2 vgsl.py setup() only dispatches `fail`,
+                # `union`, or `new` — the `add`/`both` advertised by ketos --help are
+                # argparse-only and raise ValueError at runtime. `union` preserves
+                # the base codec, appends unseen codepoints, and resizes only the
+                # output layer — exactly the Fix A transfer-learning scenario
+                # (22 shared Syriac consonants keep their weights; 5 new Sogdian
+                # classes learn from scratch). `new` rebuilds the codec from
+                # scratch and was the cause of runs #1/#2 failing.
+                "--resize", "union",
                 "--freeze-backbone", str(freeze_backbone),
             ]
         if augment:
             train_cmd.append("--augment")
+        if warmup > 0:
+            train_cmd += ["--warmup", str(warmup)]
+        if lr is not None:
+            train_cmd += ["-r", str(lr)]
 
         runner.run_training(
             name=f"{manifest.manifest_id}-{style_group_id}",

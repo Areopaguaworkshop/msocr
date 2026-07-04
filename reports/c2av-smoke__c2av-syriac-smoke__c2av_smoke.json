@@ -1,0 +1,20 @@
+{
+  "manifest_id": "c2av-smoke",
+  "style_group_id": "c2av-syriac-smoke",
+  "script_block": "U+0710",
+  "model_path": "models/kraken/c2av_smoke.safetensors",
+  "per_manuscript": {
+    "c2av01-holdout": {
+      "cer": 99.41,
+      "wer": 100.0,
+      "accuracy": 0.59
+    }
+  },
+  "per_style_group": {
+    "c2av-syriac-smoke": {
+      "cer": 99.41,
+      "wer": 100.0,
+      "accuracy": 0.59
+    }
+  }
+}

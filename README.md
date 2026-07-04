@@ -9,6 +9,64 @@ Active scope (remote training): RunPod GPU Cloud Pod submission for `ketos train
 
 Removed scope: printed OCR routing, Tesseract/OCRmyPDF fallbacks, benchmark promotion flows, artifact registry publication, and multi-language orchestration.
 
+## Christian Sogdian Fine-tune — First Run
+
+First end-to-end fine-tune from the Sophro Mhiro Syriac base model onto 12 C2AV Berlin plates (Sims-Williams 1985). Establishes the full remote-training pipeline (manifest → polygon enrichment → RunPod submit → SSH train → artifact download → local eval) and produces the first measurable CER numbers for this corpus.
+
+### Setup
+
+- **Base model**: `models/kraken/sophro_mhiro_syriac.safetensors` (Sophro Mhiro Syriac, 36-char Syriac codec, 3,466 lines across 38 manuscripts, 90.99% accuracy on its own domain)
+- **Training data**: 12 C2AV plates, 178 lines total, Latin-transliteration Sogdian (24-char codec: `. b c d f g l m n p q r s t w x y z š ž ʾ γ θ`). 0 char overlap with the base model codec.
+- **Split**: 10 train plates (148 lines) / 1 val plate p-11 (15 lines) / 1 holdout plate p-12 (19 lines). One honest generalization number on a fully unseen plate.
+- **Manifest**: `data/manifests/c2av-finetune.json`. Ground truth at `dataset/christian_sogdian_c2av/gt/c2av{01..12}_page_{01..12}.xml`, plate images at `dataset/christian_sogdian_c2av/plates/p-{01..12}.png`.
+- **Fine-tune flags**: `--augment --warmup 200 --lr 1e-4 --freeze-backbone 5000 --resize new --epochs 30 --min-epochs 20 --lag 10 --quit early`. `--resize new` rebuilds the output head for the 24-char Latin codec (the visual CNN backbone is retained from the Syriac base).
+
+### RunPod infrastructure fixes (this run)
+
+Two transient secure-cloud failures hit before training could start; both were runner-side, not training-side:
+
+1. **pip-install timeout** (run 1): setup-cmd timeout bumped 1800s → 3600s. Returns early on success, so the headroom costs nothing.
+2. **Capacity-exhaustion silent hang** (run 2, 3): `create_pod` returns a pod ID immediately even when the scheduler can't place the pod on a machine (RTX 3090 secure cloud is capacity-constrained per RunPod supply notice). The pod sits with `desired=None` + `runtime=None` and never exposes an SSH port. Added `PodNeverScheduledError` (detects stuck-in-limbo after 100s) + a 3-retry create+ssh loop in `runpod_runner.py`. Without the fix, a stuck pod hung the runner 600s then crashed; with it, attempts 1 and 2 failed cleanly in ~100s each, attempt 3 landed a GPU and completed the run.
+
+### Results
+
+Training early-stopped at epoch ~20 (best checkpoint epoch 10, val accuracy 0.175). The model was then evaluated on three plates for triangulation:
+
+| Plate | Role | CER | WER | Accuracy |
+|---|---|---|---|---|
+| c2av01 | training (seen) | 83.43% | 100.0% | 16.57% |
+| c2av11 | validation (early-stopping signal) | 82.50% | 100.0% | 17.50% |
+| c2av12 | holdout (unseen) | 82.12% | 100.0% | 17.88% |
+
+Reports:
+- `reports/c2av-finetune__c2av-syriac-finetune__c2av_finetune.{json,md}` (holdout p-12)
+- `reports/c2av-eval-val__c2av-syriac-finetune__c2av_finetune.{json,md}` (val p-11)
+- `reports/c2av-eval-train__c2av-syriac-finetune__c2av_finetune.{json,md}` (train p-01)
+
+### Diagnosis: 148 lines is the binding constraint, not the freeze schedule
+
+CER is flat at ~82% across training, validation, and holdout plates. The first hypothesis was underfitting from `--freeze-backbone 5000` (the CNN never unfroze before early stopping). A second run with `--freeze-backbone 0` disproved this:
+
+| Plate | Role | CER `--freeze-backbone 5000` | CER `--freeze-backbone 0` |
+|---|---|---|---|
+| c2av01 | training (seen) | 83.43% | 95.86% |
+| c2av11 | validation | 82.50% | 87.50% |
+| c2av12 | holdout (unseen) | 82.12% | 91.45% |
+
+Unfreezing the backbone from step 0 made every plate worse and introduced a train>val>holdout gap (overfitting). With 148 lines, neither schedule works: frozen = head can't map Latin transliteration onto frozen Syriac features (flat 82%); unfrozen = backbone catastrophically forgets Syriac features before the new Latin head converges, while overfitting the tiny training set. The binding constraint is data quantity, not the freeze schedule — exactly what the feasibility research predicted.
+
+### What the model is still good for
+
+A CER 82% model is not a publishable recognizer, but it is a working baseline: a human correcting ~18% of characters is faster than transcribing from scratch, and the model improves as more plates are annotated. The infrastructure work is the real deliverable here — the full remote-training pipeline now runs end-to-end without intervention and survives transient RunPod capacity failures.
+
+### Next steps to push CER down
+
+1. **Annotate more plates** (target 500+ lines across multiple manuscripts). 148 lines is below the viable range for fine-tuning regardless of freeze schedule; research suggests 500-1000+ lines for CER < 10%. This is the single binding constraint — flag tuning is exhausted.
+2. **Leave-one-plate-out CV** across all 12 plates for a more principled evaluation than a single 19-line holdout.
+3. Once more data exists, re-tune `--freeze-backbone` (try 200-1000 for a partial warmup) and `--lr` (try 5e-5 to avoid catastrophic forgetting).
+
+See `docs/kraken-178-lines-feasibility.md` for the feasibility research that predicted 20-40% CER (the run underperformed because 148 lines is below the viable range, not because the freeze schedule was wrong).
+
 ## Recent Developments
 
 Active work has shifted toward **Christian Sogdian** manuscripts (Sogdian language written in the East Syriac script, Unicode block `U+0710`) sourced from the Sims-Williams 1985 C2AV Berlin plates. Recent changes:

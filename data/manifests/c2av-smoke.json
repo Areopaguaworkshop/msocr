@@ -1,0 +1,31 @@
+{
+  "manifest_id": "c2av-smoke",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
+  "script_block": "U+0710",
+  "script_variant": "christian-syriac-script",
+  "base_dir": "dataset/christian_sogdian_c2av",
+  "partitions": {
+    "train": [
+      {"id": "c2av01-train", "manuscript_id": "c2av01", "xml_path": "gt/c2av01_page_01.xml"}
+    ],
+    "validation": [
+      {"id": "c2av01-val", "manuscript_id": "c2av01-val", "xml_path": "gt/c2av01_page_01.xml"}
+    ],
+    "holdout": [
+      {"id": "c2av01-holdout", "manuscript_id": "c2av01-holdout", "xml_path": "gt/c2av01_page_01.xml"}
+    ]
+  },
+  "style_groups": {
+    "c2av-syriac-smoke": {
+      "manuscript_ids": ["c2av01", "c2av01-val", "c2av01-holdout"],
+      "description": "Smoke test: 1 c2av plate (17 lines), train=val=holdout. Validates fine-tuning from sophro_mhiro_syriac.safetensors with --augment and --resize new on real c2av data. Pipeline check only, not model quality.",
+      "base_model_override": "models/kraken/sophro_mhiro_syriac.safetensors"
+    }
+  },
+  "metadata": {
+    "plate_count": 1,
+    "line_count": 17,
+    "notes": "Smoke test for fine-tuning pipeline with augmentation. 1 epoch, --quit fixed, --augment. Expected cost: ~$0.02 on RTX 3090."
+  }
+}

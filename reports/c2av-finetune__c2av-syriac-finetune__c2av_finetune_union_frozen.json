@@ -1,0 +1,20 @@
+{
+  "manifest_id": "c2av-finetune",
+  "style_group_id": "c2av-syriac-finetune",
+  "script_block": "U+0710",
+  "model_path": "models/kraken/c2av_finetune_union_frozen.safetensors",
+  "per_manuscript": {
+    "c2av12": {
+      "cer": 77.75,
+      "wer": 98.73,
+      "accuracy": 22.25
+    }
+  },
+  "per_style_group": {
+    "c2av-syriac-finetune": {
+      "cer": 77.75,
+      "wer": 98.73,
+      "accuracy": 22.25
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "manifest_id": "c2av-eval-val",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
+  "script_block": "U+0710",
+  "script_variant": "christian-syriac-script",
+  "base_dir": "dataset/christian_sogdian_c2av",
+  "partitions": {
+    "train": [],
+    "validation": [],
+    "holdout": [
+      {"id": "c2av11-eval", "manuscript_id": "c2av11", "xml_path": "gt/c2av11_page_11.xml"}
+    ]
+  },
+  "style_groups": {
+    "c2av-syriac-finetune": {
+      "manuscript_ids": ["c2av11"],
+      "description": "Eval-only manifest: validation plate p-11 (seen during early-stopping).",
+      "base_model_override": "models/kraken/sophro_mhiro_syriac.safetensors"
+    }
+  },
+  "metadata": {"purpose": "eval val plate", "note": "throwaway eval manifest"}
+}

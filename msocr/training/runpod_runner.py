@@ -21,6 +21,16 @@ import runpod
 import paramiko
 
 
+class PodNeverScheduledError(RuntimeError):
+    """Pod was created but the scheduler never placed it on a machine.
+
+    Raised when desired=None AND runtime=None persist for >stuck_threshold polls
+    — the documented signature of secure-cloud GPU capacity exhaustion. The pod
+    record exists in RunPod's DB (create_pod returned an id) but no host was ever
+    assigned, so no SSH port will ever appear. Terminate + retry.
+    """
+
+
 class RunPodRunner:
     """Submit, SSH-train, poll, download, terminate one RunPod GPU Cloud Pod."""
 
@@ -52,22 +62,42 @@ class RunPodRunner:
 
     # ponytail: RunPod exposes SSH on a random public port; runtime.ports[].ip
     # and publicPort hold host:port once the container has booted. runtime is
-    # None until the container starts; on Community Cloud that can take 60-180s.
-    def _ssh_endpoint(self, pod_id: str, deadline_s: int = 600) -> tuple[str, int]:
+    # None until the container starts; on secure cloud that can take 60-180s.
+    # deadline_s bumped 600->1200 for large devel image pull (3-8 min) + boot.
+    # stuck_threshold: if desired=None AND runtime=None for >N consecutive polls,
+    # the scheduler never placed the pod (capacity exhaustion). Terminate+retry
+    # instead of waiting the full deadline — per RunPod capacity-fluctuation docs.
+    def _ssh_endpoint(self, pod_id: str, deadline_s: int = 1200,
+                      stuck_threshold: int = 10) -> tuple[str, int]:
         """Poll get_pod until runtime.ports has a public entry for port 22.
 
-        Returns (host, port).
+        Returns (host, port). Raises PodNeverScheduledError if the pod sits in
+        pre-deployment limbo (desired=None + runtime=None) for
+        stuck_threshold*10s, or RuntimeError if the deadline elapses without
+        ports (pod booted but SSH never came up — rare).
         """
         deadline = time.time() + deadline_s
+        stuck_polls = 0
         while time.time() < deadline:
             pod = runpod.get_pod(pod_id)
             rt = pod.get("runtime") if isinstance(pod, dict) else None
+            desired = pod.get("desired") if isinstance(pod, dict) else None
             ports = (rt.get("ports") or []) if isinstance(rt, dict) else []
             for p in ports:
                 if not isinstance(p, dict):
                     continue
                 if p.get("privatePort") == 22 and p.get("isIpPublic"):
                     return (p["ip"], int(p["publicPort"]))
+            # ponytail: detect capacity-exhaustion early. desired=None + runtime=None
+            # for >100s means the scheduler never placed the pod — waiting longer
+            # won't help (RTX 3090 is capacity-constrained per RunPod supply notice).
+            # Terminate + let the run() retry loop recreate the pod.
+            if desired is None and rt is None:
+                stuck_polls += 1
+                if stuck_polls >= stuck_threshold:
+                    raise PodNeverScheduledError(pod_id)
+            else:
+                stuck_polls = 0  # pod is booting (desired set or runtime present), reset
             time.sleep(10)
         raise RuntimeError(f"pod {pod_id} never exposed a public SSH port")
 
@@ -89,24 +119,47 @@ class RunPodRunner:
                 time.sleep(30)
         cmd_str = shlex.join(cmd)
         stdin, stdout, stderr = client.exec_command(cmd_str, timeout=timeout, get_pty=True)
-        # ponytail: get_pty=True forces a PTY so the remote shell sends EOF
-        # cleanly even for quiet commands (pip --quiet, mkdir). Without it,
-        # paramiko channels can hang in exit_status_ready() forever when the
-        # remote produces no output — observed hanging 2h+ on pip install.
-        # Stream stdout (which now carries stderr too via the PTY) line by
-        # line so long runs are observable.
+        # ponytail: get_pty=True merges stderr into stdout so we only read one
+        # channel. Without it, pip --quiet produces zero stdout and paramiko's
+        # blocking readline() wedges forever (observed 16+ min hang on
+        # `pip install kraken` after it had already finished).
+        #
+        # Robust drain: poll exit_status_ready() with a deadline, read any
+        # available stdout along the way. Never block on readline() alone —
+        # a quiet command that emits no final newline will block it forever
+        # even after the remote process has exited, if the PTY close races.
         chan = stdout.channel
-        chan.settimeout(timeout)
-        stdout_file = chan.makefile("rb", -1)
+        chan.settimeout(30)  # per-read timeout; overall deadline enforced below
+        deadline = time.monotonic() + timeout
         out_buf: list[str] = []
-        try:
-            for raw in iter(stdout_file.readline, b""):
-                line = raw.decode(errors="replace")
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                out_buf.append(line)
-        except socket.timeout:
-            raise RuntimeError(f"pod command timed out after {timeout}s: {cmd_str[:200]}")
+        while True:
+            # Drain any buffered stdout (non-blocking). recv_ready() returns
+            # immediately with False when nothing is queued, so we never wedge.
+            while chan.recv_ready():
+                chunk = chan.recv(65536).decode(errors="replace")
+                if chunk:
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+                    out_buf.append(chunk)
+
+            if chan.exit_status_ready():
+                # Final drain after exit (catches trailing output emitted
+                # between the last recv_ready() check and process exit).
+                while chan.recv_ready():
+                    chunk = chan.recv(65536).decode(errors="replace")
+                    if chunk:
+                        sys.stdout.write(chunk)
+                        sys.stdout.flush()
+                        out_buf.append(chunk)
+                break
+
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"pod command timed out after {timeout}s (no exit status): "
+                    f"{cmd_str[:200]}"
+                )
+            time.sleep(0.2)
+
         exit_status = chan.recv_exit_status()
         client.close()
         if exit_status != 0:
@@ -170,14 +223,38 @@ class RunPodRunner:
 
         stage = "creating RunPod pod"
         _log(stage)
-        pod_id = self.submit_pod(name)
-        _log(f"pod_id={pod_id}")
+        # ponytail: retry create_pod + _ssh_endpoint up to 3×. Secure-cloud RTX
+        # 3090 capacity fluctuates minute-to-minute; create_pod returns an id
+        # immediately even when the scheduler can't place the pod (desired=None +
+        # runtime=None for >100s = PodNeverScheduledError). Terminate the orphan
+        # and try again — a fresh slot often frees up within 30s.
+        pod_id: Optional[str] = None
+        pod_hostport: Optional[tuple[str, int]] = None
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            pod_id = self.submit_pod(name)
+            _log(f"pod_id={pod_id} (attempt {attempt}/{max_attempts})")
+            try:
+                stage = "waiting for pod SSH endpoint"
+                _log(stage)
+                pod_hostport = self._ssh_endpoint(pod_id)
+                _log(f"ssh endpoint = {pod_hostport[0]}:{pod_hostport[1]}")
+                break
+            except PodNeverScheduledError as exc:
+                _log(f"pod never scheduled (capacity exhaustion?): terminating + retrying: {exc}")
+                try:
+                    self.terminate_pod(pod_id)
+                except Exception:
+                    pass
+                pod_id = None
+                if attempt < max_attempts:
+                    time.sleep(30)
+        if pod_id is None or pod_hostport is None:
+            raise RuntimeError(
+                f"failed to launch a schedulable pod after {max_attempts} attempts "
+                f"(secure-cloud capacity exhausted; retry later or use --gpu-type fallback)")
         keep_pod_for_recovery = False
         try:
-            stage = "waiting for pod SSH endpoint"
-            _log(stage)
-            pod_hostport = self._ssh_endpoint(pod_id)
-            _log(f"ssh endpoint = {pod_hostport[0]}:{pod_hostport[1]}")
             if pre_train_upload:
                 for local, remote in pre_train_upload:
                     stage = f"uploading {local} to {remote}"
@@ -190,7 +267,7 @@ class RunPodRunner:
                 for cmd_str in setup_cmds:
                     stage = f"running setup command: {cmd_str[:120]}"
                     _log(stage)
-                    self.ssh_exec(pod_hostport, shlex.split(cmd_str), timeout=1800)
+                    self.ssh_exec(pod_hostport, shlex.split(cmd_str), timeout=3600)  # ponytail: bumped from 1800s after a transient pip-install timeout on a slow RunPod mirror; returns early on success, so the extra headroom costs nothing.
             stage = "running remote training command"
             _log(stage + ": " + shlex.join(train_cmd))
             self.ssh_exec(pod_hostport, train_cmd, timeout=poll_timeout)
@@ -212,5 +289,7 @@ class RunPodRunner:
         except FileNotFoundError as exc:
             raise FileNotFoundError(f"{stage}: {exc}") from exc
         finally:
-            if not keep_pod_for_recovery:
+            if not keep_pod_for_recovery and pod_id is not None:
+                # ponytail: pod_id is None if every attempt hit PodNeverScheduledError
+                # (already terminated inside the loop). Guard against double-terminate.
                 self.terminate_pod(pod_id)

@@ -667,6 +667,10 @@ def runtime_smoke_check_command(
               help="Number of backbone samples to freeze (fine-tune only)")
 @click.option("--augment/--no-augment", default=False, show_default=True,
               help="Enable/disable ketos data augmentation")
+@click.option("--warmup", default=0, show_default=True, type=int,
+              help="ketos --warmup steps (0=off; 200 recommended for fine-tune stability)")
+@click.option("--lr", default=None, type=float,
+              help="ketos -r learning rate (None=ketos default 1e-3; 1e-4 recommended for small-data fine-tune)")
 # ponytail: ketos 7.0.2 crashes on `-d cuda`/`-d cuda:0` with "list index out of range"
 # at the top-level group parser. `-d auto` lets pytorch pick the GPU correctly.
 @click.option("--device", default="auto", show_default=True,
@@ -680,7 +684,7 @@ def runtime_smoke_check_command(
                    "Default: pip-install kraken into the RunPod image.")
 def train_remote(manifest, style_group, base_model, output_model, reports_dir,
                  pod_gpu, pod_image, ssh_key, epochs, min_epochs, lag,
-                 freeze_backbone, augment, device, workers, quit_mode,
+                 freeze_backbone, augment, warmup, lr, device, workers, quit_mode,
                  setup_cmds) -> None:
     """Train one style-group on a RunPod GPU Cloud Pod, then evaluate locally."""
     from msocr.training.orchestrator import walk_style_group
@@ -724,6 +728,8 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             lag=lag,
             freeze_backbone=freeze_backbone,
             augment=augment,
+            warmup=warmup,
+            lr=lr,
             device=device,
             workers=workers,
             quit_mode=quit_mode,
