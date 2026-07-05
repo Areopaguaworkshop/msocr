@@ -9,7 +9,42 @@ Active scope (remote training): RunPod GPU Cloud Pod submission for `ketos train
 
 Removed scope: printed OCR routing, Tesseract/OCRmyPDF fallbacks, benchmark promotion flows, artifact registry publication, and multi-language orchestration.
 
-## Christian Sogdian Fine-tune — First Run
+## Christian Sogdian Fine-tune — Fix A v2 (shipped, current best)
+
+**Final model**: `models/kraken/c2av_finetune_union_frozen.safetensors` (16MB). Holdout CER **77.75%** (beats the 82% baseline from the first run). Path: re-encode c2av ground truth from Latin transliteration to Syriac Unicode (the script of the Sophro Mhiro base), then fine-tune with `--resize union --freeze-backbone 999999` so the 22 shared Syriac consonant weights transfer and only 5 new Sogdian classes are learned.
+
+| Plate | Role | CER (Fix A v2, union-frozen) | CER (first run, new-frozen) | Delta |
+|---|---|---|---|---|
+| c2av12 | holdout (unseen) | **77.75%** | 82.12% | -4.37 |
+| c2av11 | validation | **65.96%** | 82.50% | -16.54 |
+| c2av01 | training (seen) | **45.30%** | 83.43% | -38.13 |
+
+The clean train<val<holdout ordering (45 → 66 → 78) is the signature of real learning, not memorization noise. Reports in `reports/c2av-finetune__c2av-syriac-finetune__c2av_finetune_union_frozen.{json,md}` (holdout) plus `c2av-eval-val__*` and `c2av-eval-train__*` for the other two plates.
+
+### What worked
+
+- **Re-encoding GT to Syriac script** (`scripts/latin_to_syriac.py`, 179 lines, 0 unmapped): turns a zero-codec-overlap rebuild into a 5-class delta fine-tune. 22 of 25 target chars already exist in the Sophro base codec; only U+0741 (qushshaya), U+0742 (rukkakha), U+074D (Sogdian ZHAIN), U+074E (Sogdian KHAPH), U+074F (Sogdian FE) are new.
+- **`--resize union`**: preserves base codec class indices + weights, appends 5 new rows to the output layer. Zero-shot alignment held (val_acc > 0 from epoch 1).
+- **`--freeze-backbone 999999`** (freeze forever): the binding fix. With a frozen Sophro CNN+LSTM backbone, the 5 new-class logits get a clean gradient signal; unfreezing at any LR (1e-3, 1e-4, 1e-5) or warmup (0, 200, 500) consistently destroys the transferred features before the new head stabilizes (catastrophic forgetting). Frozen-backbone is the ceiling at 148 lines.
+
+### What did not work
+
+- **Backbone unfreeze** (4 attempts: `--freeze-backbone 0/500/5000`, LRs 1e-3 to 1e-5, warmups 0/200/500, base or 3.2-frozen as starting checkpoint): every variant diverged — val_acc collapsed to 0, loss bounced 12→205→11→52, or staged unfreeze (3.3, loaded 3.2 frozen as base at LR 1e-5 + 500 warmup) collapsed at epoch 39. Unfreeze is a no-go at 148 lines regardless of LR, warmup, or starting checkpoint.
+- **`--resize new`** (first run): rebuilt the output head from scratch for the 24-char Latin codec, discarding the 22 shared Syriac consonant weights. CER 82% flat — the baseline Fix A v2 beats.
+
+### Post-processor
+
+`scripts/syriac_to_latin.py` (~60 lines, stdlib only) reverses the Syriac-script output back to Latin transliteration. Deterministic 1:1 reverse lookup for 22 base consonants + 3 Sogdian letters, with TAW+qushshaya→`t` / TAW+rukkakha→`θ` diacritic handling and a small Sogdian wordform dictionary (`SOFT_DICT`) for hard/soft disambiguation of GAMAL (g/γ) and DALATH (d/δ). Round-trip tested: 23/23 chars recover correctly. Bare TAW defaults to hard `t` (conservative for diacritic-dropped HTR output).
+
+### Next steps to push CER down
+
+1. **Annotate more plates** (target 500–1000+ lines across multiple manuscripts). 148 lines is the binding constraint — frozen-backbone 77.75% is the ceiling for this data volume. More data is the only path to CER < 10%.
+2. **Leave-one-plate-out CV** across all 12 plates for a more principled evaluation than a single 19-line holdout.
+3. **Once more data exists**, revisit staged unfreeze — with 500+ lines the per-line gradient noise drops and unfreezing may finally stabilize. Until then, frozen-backbone is the only stable regime.
+
+See `docs/fix-a-v2-syriac-script-finetune.md` for the full Fix A v2 report (supersedes `docs/fix-a-syriac-script-finetune.md`, which documents the failed v1 union+unfrozen runs).
+
+## Christian Sogdian Fine-tune — First Run (historical, superseded by Fix A v2)
 
 First end-to-end fine-tune from the Sophro Mhiro Syriac base model onto 12 C2AV Berlin plates (Sims-Williams 1985). Establishes the full remote-training pipeline (manifest → polygon enrichment → RunPod submit → SSH train → artifact download → local eval) and produces the first measurable CER numbers for this corpus.
 

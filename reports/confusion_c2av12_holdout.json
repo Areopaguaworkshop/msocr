@@ -1,0 +1,327 @@
+[
+  {
+    "correct": "ܝ",
+    "generated": "",
+    "errors": 39
+  },
+  {
+    "correct": "ܘ",
+    "generated": "",
+    "errors": 27
+  },
+  {
+    "correct": "SPACE",
+    "generated": "",
+    "errors": 26
+  },
+  {
+    "correct": "ܐ",
+    "generated": "",
+    "errors": 24
+  },
+  {
+    "correct": "ܬ",
+    "generated": "",
+    "errors": 19
+  },
+  {
+    "correct": "ܪ",
+    "generated": "",
+    "errors": 18
+  },
+  {
+    "correct": "ܢ",
+    "generated": "",
+    "errors": 18
+  },
+  {
+    "correct": "SYRIAC QUSHSHAYA",
+    "generated": "",
+    "errors": 17
+  },
+  {
+    "correct": "ݎ",
+    "generated": "",
+    "errors": 11
+  },
+  {
+    "correct": "ܩ",
+    "generated": "",
+    "errors": 9
+  },
+  {
+    "correct": "ܓ",
+    "generated": "",
+    "errors": 9
+  },
+  {
+    "correct": "ܙ",
+    "generated": "",
+    "errors": 9
+  },
+  {
+    "correct": "ܫ",
+    "generated": "",
+    "errors": 8
+  },
+  {
+    "correct": "ܡ",
+    "generated": "",
+    "errors": 8
+  },
+  {
+    "correct": ".",
+    "generated": "",
+    "errors": 7
+  },
+  {
+    "correct": "ܨ",
+    "generated": "",
+    "errors": 6
+  },
+  {
+    "correct": "ܦ",
+    "generated": "",
+    "errors": 5
+  },
+  {
+    "correct": "ܒ",
+    "generated": "",
+    "errors": 5
+  },
+  {
+    "correct": "ܝ",
+    "generated": "SPACE",
+    "errors": 3
+  },
+  {
+    "correct": "ܣ",
+    "generated": "",
+    "errors": 3
+  },
+  {
+    "correct": "ݍ",
+    "generated": "",
+    "errors": 3
+  },
+  {
+    "correct": "ܝ",
+    "generated": "ܬ",
+    "errors": 3
+  },
+  {
+    "correct": "ܫ",
+    "generated": "ܐ",
+    "errors": 3
+  },
+  {
+    "correct": "ܕ",
+    "generated": "",
+    "errors": 3
+  },
+  {
+    "correct": "ܘ",
+    "generated": "ܪ",
+    "errors": 2
+  },
+  {
+    "correct": "SYRIAC RUKKAKHA",
+    "generated": "",
+    "errors": 2
+  },
+  {
+    "correct": "SPACE",
+    "generated": "SYRIAC QUSHSHAYA",
+    "errors": 2
+  },
+  {
+    "correct": "ܢ",
+    "generated": "ܬ",
+    "errors": 2
+  },
+  {
+    "correct": "ܐ",
+    "generated": "ܢ",
+    "errors": 2
+  },
+  {
+    "correct": "ܐ",
+    "generated": "SYRIAC QUSHSHAYA",
+    "errors": 2
+  },
+  {
+    "correct": "ܘ",
+    "generated": "SPACE",
+    "errors": 2
+  },
+  {
+    "correct": "ܙ",
+    "generated": "ܬ",
+    "errors": 2
+  },
+  {
+    "correct": "ܨ",
+    "generated": "ܐ",
+    "errors": 1
+  },
+  {
+    "correct": "ܝ",
+    "generated": "ܣ",
+    "errors": 1
+  },
+  {
+    "correct": "ܨ",
+    "generated": "ܬ",
+    "errors": 1
+  },
+  {
+    "correct": "ܝ",
+    "generated": "ܫ",
+    "errors": 1
+  },
+  {
+    "correct": "ݏ",
+    "generated": "",
+    "errors": 1
+  },
+  {
+    "correct": "ݍ",
+    "generated": "ܝ",
+    "errors": 1
+  },
+  {
+    "correct": "ܦ",
+    "generated": "ܪ",
+    "errors": 1
+  },
+  {
+    "correct": "ܙ",
+    "generated": "SPACE",
+    "errors": 1
+  },
+  {
+    "correct": "ܐ",
+    "generated": "SPACE",
+    "errors": 1
+  },
+  {
+    "correct": "ܓ",
+    "generated": "ܕ",
+    "errors": 1
+  },
+  {
+    "correct": "ܪ",
+    "generated": "ܕ",
+    "errors": 1
+  },
+  {
+    "correct": "ܝ",
+    "generated": "ܐ",
+    "errors": 1
+  },
+  {
+    "correct": "SYRIAC QUSHSHAYA",
+    "generated": "ܐ",
+    "errors": 1
+  },
+  {
+    "correct": "ܦ",
+    "generated": "SPACE",
+    "errors": 1
+  },
+  {
+    "correct": "ܢ",
+    "generated": "SYRIAC QUSHSHAYA",
+    "errors": 1
+  },
+  {
+    "correct": ".",
+    "generated": "SYRIAC QUSHSHAYA",
+    "errors": 1
+  },
+  {
+    "correct": "ܬ",
+    "generated": "SPACE",
+    "errors": 1
+  },
+  {
+    "correct": "SPACE",
+    "generated": "ܘ",
+    "errors": 1
+  },
+  {
+    "correct": "ܪ",
+    "generated": "ܐ",
+    "errors": 1
+  },
+  {
+    "correct": "ܦ",
+    "generated": "ܬ",
+    "errors": 1
+  },
+  {
+    "correct": "ܩ",
+    "generated": "ܬ",
+    "errors": 1
+  },
+  {
+    "correct": "",
+    "generated": "ܬ",
+    "errors": 1
+  },
+  {
+    "correct": "ܘ",
+    "generated": "SYRIAC QUSHSHAYA",
+    "errors": 1
+  },
+  {
+    "correct": "ݎ",
+    "generated": "ܬ",
+    "errors": 1
+  },
+  {
+    "correct": "SYRIAC RUKKAKHA",
+    "generated": "SYRIAC QUSHSHAYA",
+    "errors": 1
+  },
+  {
+    "correct": "ܐ",
+    "generated": "ܝ",
+    "errors": 1
+  },
+  {
+    "correct": "ܪ",
+    "generated": "SYRIAC QUSHSHAYA",
+    "errors": 1
+  },
+  {
+    "correct": "",
+    "generated": "ܐ",
+    "errors": 1
+  },
+  {
+    "correct": "",
+    "generated": "ܕ",
+    "errors": 1
+  },
+  {
+    "correct": "",
+    "generated": "SPACE",
+    "errors": 1
+  },
+  {
+    "correct": "ܢ",
+    "generated": "ܪ",
+    "errors": 1
+  },
+  {
+    "correct": "ܝ",
+    "generated": "ܪ",
+    "errors": 1
+  },
+  {
+    "correct": "ܐ",
+    "generated": "ܦ",
+    "errors": 1
+  }
+]

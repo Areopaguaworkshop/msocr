@@ -1,0 +1,92 @@
+Loading from /home/ajiap/project/msocr/models/kraken/c2av_finetune_union_frozen.safetensors.
+Testing ━━━━━━━━━━━━━━━━━━ 19/19 0:00:18 • 0:00:00 1.00it/s  early_stopping:    
+                                                             0/10 -inf          
+=== report  ===
+
+427	Characters
+332	Errors
+22.25%	Character Accuracy
+22.25%	Character Accuracy (Case-insensitive)
+-1.27%	Word Accuracy
+
+277	Insertions
+4	Deletions
+51	Substitutions
+
+Count	Missed	%Right
+68	37	45.59%	Common
+359	291	18.94%	Syriac
+
+Errors	Correct-Generated
+39	{ ܝ } - {  }
+27	{ ܘ } - {  }
+26	{ SPACE } - {  }
+24	{ ܐ } - {  }
+19	{ ܬ } - {  }
+18	{ ܪ } - {  }
+18	{ ܢ } - {  }
+17	{ SYRIAC QUSHSHAYA } - {  }
+11	{ ݎ } - {  }
+9	{ ܩ } - {  }
+9	{ ܓ } - {  }
+9	{ ܙ } - {  }
+8	{ ܫ } - {  }
+8	{ ܡ } - {  }
+7	{ . } - {  }
+6	{ ܨ } - {  }
+5	{ ܦ } - {  }
+5	{ ܒ } - {  }
+3	{ ܝ } - { SPACE }
+3	{ ܣ } - {  }
+3	{ ݍ } - {  }
+3	{ ܝ } - { ܬ }
+3	{ ܫ } - { ܐ }
+3	{ ܕ } - {  }
+2	{ ܘ } - { ܪ }
+2	{ SYRIAC RUKKAKHA } - {  }
+2	{ SPACE } - { SYRIAC QUSHSHAYA }
+2	{ ܢ } - { ܬ }
+2	{ ܐ } - { ܢ }
+2	{ ܐ } - { SYRIAC QUSHSHAYA }
+2	{ ܘ } - { SPACE }
+2	{ ܙ } - { ܬ }
+1	{ ܨ } - { ܐ }
+1	{ ܝ } - { ܣ }
+1	{ ܨ } - { ܬ }
+1	{ ܝ } - { ܫ }
+1	{ ݏ } - {  }
+1	{ ݍ } - { ܝ }
+1	{ ܦ } - { ܪ }
+1	{ ܙ } - { SPACE }
+1	{ ܐ } - { SPACE }
+1	{ ܓ } - { ܕ }
+1	{ ܪ } - { ܕ }
+1	{ ܝ } - { ܐ }
+1	{ SYRIAC QUSHSHAYA } - { ܐ }
+1	{ ܦ } - { SPACE }
+1	{ ܢ } - { SYRIAC QUSHSHAYA }
+1	{ . } - { SYRIAC QUSHSHAYA }
+1	{ ܬ } - { SPACE }
+1	{ SPACE } - { ܘ }
+1	{ ܪ } - { ܐ }
+1	{ ܦ } - { ܬ }
+1	{ ܩ } - { ܬ }
+1	{  } - { ܬ }
+1	{ ܘ } - { SYRIAC QUSHSHAYA }
+1	{ ݎ } - { ܬ }
+1	{ SYRIAC RUKKAKHA } - { SYRIAC QUSHSHAYA }
+1	{ ܐ } - { ܝ }
+1	{ ܪ } - { SYRIAC QUSHSHAYA }
+1	{  } - { ܐ }
+1	{  } - { ܕ }
+1	{  } - { SPACE }
+1	{ ܢ } - { ܪ }
+1	{ ܝ } - { ܪ }
+1	{ ܐ } - { ܦ }
+
+
+--- STDERR ---
+GPU available: False, used: False
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+💡 Tip: For seamless cloud uploads and versioning, try installing [litmodels](https://pypi.org/project/litmodels/) to enable LitModelCheckpoint, which syncs automatically with the Lightning model registry.
