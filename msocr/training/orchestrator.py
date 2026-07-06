@@ -151,6 +151,8 @@ def walk_style_group(
     workers: int = 8,
     quit_mode: str = "fixed",
     setup_cmds: list[str] | None = None,
+    freeze_old_rows: bool = False,
+    codec_json_path: str | None = None,
 ) -> dict:
     """Train + evaluate one style-group. Returns the eval report dict.
 
@@ -158,6 +160,12 @@ def walk_style_group(
     style_group ``base_model_override`` in manifest > ``DEFAULT_BASE_MODELS``
     for the manifest's ``script_block``. If none match, trains from scratch.
     If ``setup_cmds`` is None, defaults to installing kraken into the pod image.
+
+    When ``freeze_old_rows`` is True, swaps the training command from
+    `ketos train` to the §1 row-freeze Python-API harness
+    (`msocr.training.ketos_trainer_api`). The harness file + ``codec_json_path``
+    are uploaded to the pod and run via `python3`. Requires ``codec_json_path``
+    to point to the Phase 0a union codec JSON (default: reports/c2av_union_codec.json).
     """
     if setup_cmds is None:
         setup_cmds = [
@@ -220,37 +228,77 @@ def walk_style_group(
 
         # ketos 7.0: -t/-e expect text manifests (one path per line);
         # -f page parses positional XML args. We pass XML via manifests.
-        train_cmd = [
-            "ketos", "-d", device, "--workers", str(workers), "train",
-            "--quit", quit_mode,
-            "--epochs", str(epochs),
-            "--min-epochs", str(min_epochs),
-            "--lag", str(lag),
-            "-f", "page",
-            "-t", "/workspace/train_manifest.txt",
-            "-e", "/workspace/val_manifest.txt",
-            "-o", "/workspace/models/" + style_group_id,
-        ]
-        if load_model_path:
-            train_cmd += [
-                "--load", "/workspace/base.safetensors",
-                # ponytail: kraken 7.0.2 vgsl.py setup() only dispatches `fail`,
-                # `union`, or `new` — the `add`/`both` advertised by ketos --help are
-                # argparse-only and raise ValueError at runtime. `union` preserves
-                # the base codec, appends unseen codepoints, and resizes only the
-                # output layer — exactly the Fix A transfer-learning scenario
-                # (22 shared Syriac consonants keep their weights; 5 new Sogdian
-                # classes learn from scratch). `new` rebuilds the codec from
-                # scratch and was the cause of runs #1/#2 failing.
+        if freeze_old_rows:
+            # ponytail: §1 row-freeze path. The ketos CLI has no per-row freeze
+            # flag, so we ship the Python-API harness (Phase 0b) to the pod
+            # and run it via `python3`. The harness uses KrakenTrainer directly
+            # with a register_hook that zeros old-row grads every step.
+            harness_src = Path(__file__).parent / "ketos_trainer_api.py"
+            if not harness_src.exists():
+                raise FileNotFoundError(f"Row-freeze harness not found: {harness_src}")
+            codec_json = Path(codec_json_path) if codec_json_path else Path("reports/c2av_union_codec.json")
+            if not codec_json.exists():
+                raise FileNotFoundError(
+                    f"Codec JSON not found: {codec_json}. Run `scripts/dump_codec.py` first (Phase 0a)."
+                )
+            pre_train_upload.append((str(harness_src), "/workspace/ketos_trainer_api.py"))
+            pre_train_upload.append((str(codec_json), "/workspace/codec.json"))
+            # ponytail: when freeze_old_rows is set, force freeze_backbone to
+            # 999999 (whole run) — the §1 mechanism assumes a frozen backbone.
+            effective_freeze_backbone = 999999
+            train_cmd = [
+                "python3", "/workspace/ketos_trainer_api.py",
+                "--load", "/workspace/base.safetensors" if load_model_path else "scratch",
+                "--train-manifest", "/workspace/train_manifest.txt",
+                "--eval-manifest", "/workspace/val_manifest.txt",
+                "--codec-json", "/workspace/codec.json",
+                "--checkpoint-path", "/workspace/models/" + style_group_id,
+                "--format-type", "page",
                 "--resize", "union",
-                "--freeze-backbone", str(freeze_backbone),
+                "--epochs", str(epochs),
+                "--min-epochs", str(min_epochs),
+                "--lag", str(lag),
+                "--lrate", str(lr if lr is not None else 1e-4),
+                "--warmup", str(warmup),
+                "--quit", quit_mode,
+                "--freeze-backbone", str(effective_freeze_backbone),
+                "--num-workers", str(workers),
+                "--accelerator", device if device != "auto" else "auto",
             ]
-        if augment:
-            train_cmd.append("--augment")
-        if warmup > 0:
-            train_cmd += ["--warmup", str(warmup)]
-        if lr is not None:
-            train_cmd += ["-r", str(lr)]
+            if augment:
+                train_cmd.append("--augment")
+        else:
+            train_cmd = [
+                "ketos", "-d", device, "--workers", str(workers), "train",
+                "--quit", quit_mode,
+                "--epochs", str(epochs),
+                "--min-epochs", str(min_epochs),
+                "--lag", str(lag),
+                "-f", "page",
+                "-t", "/workspace/train_manifest.txt",
+                "-e", "/workspace/val_manifest.txt",
+                "-o", "/workspace/models/" + style_group_id,
+            ]
+            if load_model_path:
+                train_cmd += [
+                    "--load", "/workspace/base.safetensors",
+                    # ponytail: kraken 7.0.2 vgsl.py setup() only dispatches `fail`,
+                    # `union`, or `new` — the `add`/`both` advertised by ketos --help are
+                    # argparse-only and raise ValueError at runtime. `union` preserves
+                    # the base codec, appends unseen codepoints, and resizes only the
+                    # output layer — exactly the Fix A transfer-learning scenario
+                    # (22 shared Syriac consonants keep their weights; 5 new Sogdian
+                    # classes learn from scratch). `new` rebuilds the codec from
+                    # scratch and was the cause of runs #1/#2 failing.
+                    "--resize", "union",
+                    "--freeze-backbone", str(freeze_backbone),
+                ]
+            if augment:
+                train_cmd.append("--augment")
+            if warmup > 0:
+                train_cmd += ["--warmup", str(warmup)]
+            if lr is not None:
+                train_cmd += ["-r", str(lr)]
 
         runner.run_training(
             name=f"{manifest.manifest_id}-{style_group_id}",

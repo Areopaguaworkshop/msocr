@@ -682,10 +682,18 @@ def runtime_smoke_check_command(
 @click.option("--setup-cmd", "setup_cmds", multiple=True, show_default=True,
               help="Shell command to run on pod before training (repeatable). "
                    "Default: pip-install kraken into the RunPod image.")
+@click.option("--freeze-old-rows/--no-freeze-old-rows", default=False, show_default=True,
+              help="§1 row-freeze: ship the Phase 0b Python-API harness to the pod and "
+                   "freeze the 37 old-class classifier rows, leaving the 5 new Sogdian "
+                   "rows trainable. Forces --freeze-backbone 999999. Requires the "
+                   "Phase 0a codec JSON at reports/c2av_union_codec.json.")
+@click.option("--codec-json", default="reports/c2av_union_codec.json", show_default=True,
+              type=click.Path(path_type=Path),
+              help="Path to the Phase 0a union codec JSON (row map). Used only with --freeze-old-rows.")
 def train_remote(manifest, style_group, base_model, output_model, reports_dir,
                  pod_gpu, pod_image, ssh_key, epochs, min_epochs, lag,
                  freeze_backbone, augment, warmup, lr, device, workers, quit_mode,
-                 setup_cmds) -> None:
+                 setup_cmds, freeze_old_rows, codec_json) -> None:
     """Train one style-group on a RunPod GPU Cloud Pod, then evaluate locally."""
     from msocr.training.orchestrator import walk_style_group
     from msocr.training.runpod_runner import RunPodRunner
@@ -734,6 +742,8 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
             workers=workers,
             quit_mode=quit_mode,
             setup_cmds=list(setup_cmds) if setup_cmds else None,
+            freeze_old_rows=freeze_old_rows,
+            codec_json_path=str(codec_json) if freeze_old_rows else None,
         )
     except (RuntimeError, TimeoutError, FileNotFoundError, KeyError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
