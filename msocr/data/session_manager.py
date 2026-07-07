@@ -483,7 +483,8 @@ class SessionManager:
                 coords = region.find("page:Coords", ns)
                 polygon = _parse_points(coords.get("points")) if coords is not None else []
                 regions.append({"id": rid, "polygon": polygon, "type": rtype})
-                # lines nested under this region
+                # lines nested under this region — record region_id so export
+                # can re-nest each line under its actual parent region.
                 for line in region.findall("page:TextLine", ns):
                     lid = line.get("id", f"l{len(lines)+1}")
                     ltype = _type_from_custom(line.get("custom", "")) or "DefaultLine"
@@ -503,10 +504,12 @@ class SessionManager:
                         "boundary": boundary,
                         "type": ltype,
                         "transcript": transcript,
+                        "region_id": rid,
                     })
 
             # ponytail: also catch lines not nested under a region (some XMLs
             # attach TextLine directly to Page). Rare but shouldn't be lost.
+            # region_id is None — export will assign by nearest centroid.
             page = root.find(".//page:Page", ns)
             if page is not None:
                 for line in page.findall("page:TextLine", ns):
@@ -530,11 +533,26 @@ class SessionManager:
                             "boundary": boundary,
                             "type": ltype,
                             "transcript": transcript,
+                            "region_id": None,
                         })
+
+            # ponytail: parse <ReadingOrder> if present, returning the ordered
+            # list of region refs so export can reproduce the same order. Empty
+            # when absent — caller falls back to document order of TextRegions.
+            reading_order: List[str] = []
+            ro = root.find(".//page:ReadingOrder", ns)
+            if ro is not None:
+                for ref in ro.findall(".//page:RegionRefIndexed", ns):
+                    rid_ref = ref.get("regionRef")
+                    if rid_ref:
+                        reading_order.append(rid_ref)
 
             if not regions and not lines:
                 return None
-            return {"regions": regions, "lines": lines}
+            state: Dict[str, Any] = {"regions": regions, "lines": lines}
+            if reading_order:
+                state["reading_order"] = reading_order
+            return state
         except Exception as e:
             logger.error("Failed to parse PAGE XML: %s", e)
             return None
@@ -929,48 +947,125 @@ class SessionManager:
         )
 
     def _export_alto(self, session: AnnotationSession) -> str:
-        """Export session to ALTO XML format."""
+        """Export session to ALTO XML format.
+
+        Reads v2 annotation state (drawing UI: regions + lines) when present
+        so drawing-UI annotations are no longer silently dropped. Falls back
+        to the legacy v1 path (per-line ``session.lines`` + ``annotations``)
+        when no v2 state exists, preserving the existing v1 test contract.
+        """
         # Create ALTO XML structure
         alto = ET.Element("alto", xmlns="http://www.loc.gov/standards/alto/ns-v4#")
-        
+
         # Description
         description = ET.SubElement(alto, "Description")
         measurement_unit = ET.SubElement(description, "MeasurementUnit")
         measurement_unit.text = "pixel"
-        
+
         # Tags for script variant
         tags = ET.SubElement(alto, "Tags")
         other_tag = ET.SubElement(tags, "OtherTag")
         other_tag.set("ID", f"script_{session.script_variant}")
         other_tag.set("LABEL", session.script_variant)
-        
+
         # Source image info
         source_image_info = ET.SubElement(description, "sourceImageInformation")
         file_name = ET.SubElement(source_image_info, "fileName")
         file_name.text = session.source
-        
+
         # Layout
         layout = ET.SubElement(alto, "Layout")
         page = ET.SubElement(layout, "Page")
         page.set("ID", "page_1")
         page.set("PHYSICAL_IMG_NR", "1")
-        
+
         print_space = ET.SubElement(page, "PrintSpace")
 
+        # ponytail: v2 path when drawing-UI state exists. Each v2 region →
+        # one TextBlock; v2 lines nested under their region (orphan lines
+        # attach to the print space as their own TextBlock). v1 fallback
+        # below preserves the existing v1 ALTO test contract.
+        v2 = session.annotations_v2 or {}
+        v2_regions = v2.get("regions") or []
+        v2_lines = v2.get("lines") or []
+        if v2_regions or v2_lines:
+            region_ids = {str(r.get("id")) for r in v2_regions}
+            # index lines by region_id; orphans collected separately
+            lines_by_region: Dict[str, List[Dict[str, Any]]] = {}
+            orphans: List[Dict[str, Any]] = []
+            for line in v2_lines:
+                rid = line.get("region_id")
+                if rid and str(rid) in region_ids:
+                    lines_by_region.setdefault(str(rid), []).append(line)
+                else:
+                    orphans.append(line)
+
+            block_idx = 0
+            line_idx = 0
+            for region in v2_regions:
+                rid = str(region.get("id"))
+                block_idx += 1
+                textblock = ET.SubElement(print_space, "TextBlock")
+                textblock.set("ID", f"block_{block_idx}")
+                textblock.set("LANG", session.language)
+                textblock.set("TAGREFS", f"script_{session.script_variant}")
+                # ponytail: derive TextBlock HPOS/VPOS/WIDTH/HEIGHT from the
+                # region polygon bbox — ALTO requires layout coords on the
+                # block. Empty polygon → leave at 0/0/0/0 (rare).
+                poly = region.get("polygon") or []
+                if poly:
+                    xs = [p[0] for p in poly]
+                    ys = [p[1] for p in poly]
+                    textblock.set("HPOS", str(min(xs)))
+                    textblock.set("VPOS", str(min(ys)))
+                    textblock.set("WIDTH", str(max(xs) - min(xs)))
+                    textblock.set("HEIGHT", str(max(ys) - min(ys)))
+                else:
+                    textblock.set("HPOS", "0")
+                    textblock.set("VPOS", "0")
+                    textblock.set("WIDTH", "0")
+                    textblock.set("HEIGHT", "0")
+                for line in lines_by_region.get(rid, []):
+                    self._emit_alto_line(
+                        textblock, line, session, line_idx
+                    )
+                    line_idx += 1
+
+            # ponytail: orphan v2 lines — no region. One TextBlock each so
+            # nothing is dropped. ALTO allows TextLine directly in PrintSpace
+            # but a TextBlock wrapper keeps it consistent with the v2 path.
+            for line in orphans:
+                block_idx += 1
+                textblock = ET.SubElement(print_space, "TextBlock")
+                textblock.set("ID", f"block_{block_idx}")
+                textblock.set("LANG", session.language)
+                textblock.set("TAGREFS", f"script_{session.script_variant}")
+                self._emit_alto_line(
+                    textblock, line, session, line_idx
+                )
+                line_idx += 1
+
+            tree = ET.ElementTree(alto)
+            import io
+            output = io.BytesIO()
+            tree.write(output, encoding="utf-8", xml_declaration=True)
+            return output.getvalue().decode("utf-8")
+
+        # v1 fallback (legacy per-line regions)
         # Map line coords back from cropped-page space to original page space.
         off_x, off_y = session.crop_offset
-        
+
         # Process lines
         for line in session.lines:
             line_id = line.line_id
             annotation = session.annotations.get(line_id, {})
-            
+
             # Skip if marked for skip
             if annotation.get("skip", False):
                 continue
-            
+
             transcript = annotation.get("transcript", "")
-            
+
             # Get coordinates
             if line.boundary_points:
                 min_x = min(p[0] for p in line.boundary_points) + off_x
@@ -981,7 +1076,7 @@ class SessionManager:
                 height = max_y - min_y
             else:
                 min_x, min_y, width, height = 0, 0, 100, 20
-            
+
             # Create TextBlock with LANG and TAGREFS
             textblock = ET.SubElement(print_space, "TextBlock")
             textblock.set("ID", f"block_{line.order}")
@@ -991,7 +1086,7 @@ class SessionManager:
             textblock.set("VPOS", str(min_y))
             textblock.set("WIDTH", str(width))
             textblock.set("HEIGHT", str(height))
-            
+
             # Create TextLine
             textline = ET.SubElement(textblock, "TextLine")
             textline.set("ID", line_id)
@@ -999,27 +1094,66 @@ class SessionManager:
             textline.set("VPOS", str(min_y))
             textline.set("WIDTH", str(width))
             textline.set("HEIGHT", str(height))
-            
+
             # Add baseline if available
             if line.baseline_points:
                 baseline_str = " ".join(f"{x + off_x},{y + off_y}" for x, y in line.baseline_points)
                 baseline = ET.SubElement(textline, "Baseline")
                 baseline.set("POINTS", baseline_str)
-            
+
             # Add String with transcript
             if transcript:
                 string_elem = ET.SubElement(textline, "String")
                 string_elem.set("ID", f"string_{line.order}")
                 string_elem.set("CONTENT", transcript)
-        
+
         # Convert to string
         tree = ET.ElementTree(alto)
-        
+
         # Use explicit encoding
         import io
         output = io.BytesIO()
         tree.write(output, encoding="utf-8", xml_declaration=True)
         return output.getvalue().decode("utf-8")
+
+    @staticmethod
+    def _emit_alto_line(
+        parent: ET.Element,
+        line: Dict[str, Any],
+        session: "AnnotationSession",
+        line_idx: int,
+    ) -> None:
+        """Emit one ALTO <TextLine> from a v2 line dict under ``parent``.
+
+        ponytail: static helper factored out of _export_alto's v2 path so the
+        region-blocked and orphan-line cases share one writer. Coordinates
+        come straight from v2 (already in original-page space — no crop
+        offset like v1). Empty boundary → 0/0/0/0 placeholder, matching v1.
+        """
+        boundary = line.get("boundary") or []
+        if boundary:
+            xs = [p[0] for p in boundary]
+            ys = [p[1] for p in boundary]
+            min_x, min_y = min(xs), min(ys)
+            width, height = max(xs) - min(xs), max(ys) - min(ys)
+        else:
+            min_x, min_y, width, height = 0, 0, 100, 20
+        textline = ET.SubElement(parent, "TextLine")
+        textline.set("ID", str(line.get("id", f"line_{line_idx}")))
+        textline.set("HPOS", str(min_x))
+        textline.set("VPOS", str(min_y))
+        textline.set("WIDTH", str(width))
+        textline.set("HEIGHT", str(height))
+        baseline = line.get("baseline") or []
+        if baseline:
+            baseline_str = " ".join(f"{int(x)},{int(y)}" for x, y in baseline)
+            bl = ET.SubElement(textline, "Baseline")
+            bl.set("POINTS", baseline_str)
+        transcript = line.get("transcript", "") or ""
+        if transcript:
+            string_elem = ET.SubElement(textline, "String")
+            string_elem.set("ID", f"string_{line_idx}")
+            string_elem.set("CONTENT", transcript)
 
     def _export_page_xml(self, session: AnnotationSession) -> str:
         """Export session to PAGE XML format.
@@ -1110,8 +1244,12 @@ class SessionManager:
         """PAGE XML using v2 annotation state with SegmOnto custom attributes.
 
         Emits regions (with their polygon Coords) and lines (with baseline +
-        boundary Coords + TextEquiv transcript). Lines are nested under the
-        first region; if no regions exist, lines attach directly to the page.
+        boundary Coords + TextEquiv transcript). Each line is nested under its
+        actual parent region (line.get("region_id")); a line with no
+        region_id is assigned to the nearest region by baseline midpoint, or
+        to a synthetic default region if no regions exist. Emits a top-to-bottom
+        ``<ReadingOrder>`` so RTL Sogdian (kraken-fragmentary-manuscripts.md §4.2)
+        reading order is explicit and round-trips through parse_page_xml_to_v2.
         """
         state = session.annotations_v2
         regions = state.get("regions", []) or []
@@ -1120,43 +1258,134 @@ class SessionManager:
         def _pts_to_str(points) -> str:
             return " ".join(f"{int(x)},{int(y)}" for x, y in points)
 
-        # ponytail: nest all lines under the first region (or page) — the
-        # drawing UI doesn't yet model line→region membership, and PAGE
-        # requires TextLine inside a TextRegion. Add per-line region refs
-        # when the UI starts tracking them.
-        parent_region = None
-        for idx, region in enumerate(regions, start=1):
+        # ponytail: region ordering — if state carries reading_order (parsed
+        # from a prior export), use it; otherwise keep document order. Both
+        # paths emit the regions top-to-bottom by region centroid y as a
+        # stable default for the ReadingOrder element. kraken's text_direction
+        # handles RTL within a region; region order is still top-to-bottom.
+        ordered_regions = list(regions)
+        reading_order_pref = state.get("reading_order") or []
+        if reading_order_pref:
+            # ponytail: stable sort by reading_order index, unknowns last
+            order_idx = {rid: i for i, rid in enumerate(reading_order_pref)}
+            ordered_regions.sort(
+                key=lambda r: order_idx.get(r.get("id"), len(order_idx) + 1)
+            )
+        else:
+            def _region_cy(r: Dict[str, Any]) -> float:
+                poly = r.get("polygon") or []
+                return sum(p[1] for p in poly) / len(poly) if poly else 0.0
+            ordered_regions.sort(key=_region_cy)
+
+        # Build region elements keyed by id for line nesting.
+        region_elem_by_id: Dict[str, ET.Element] = {}
+        region_elems: List[ET.Element] = []
+        for idx, region in enumerate(ordered_regions, start=1):
             textregion = ET.SubElement(page, "TextRegion")
-            textregion.set("id", str(region.get("id", f"r{idx}")))
+            rid = str(region.get("id", f"r{idx}"))
+            textregion.set("id", rid)
             rtype = region.get("type", "MainZone")
             textregion.set("custom", f"structure {{type:{rtype};}}")
             polygon = region.get("polygon") or []
             if polygon:
                 coords = ET.SubElement(textregion, "Coords")
                 coords.set("points", _pts_to_str(polygon))
-            if parent_region is None:
-                parent_region = textregion
+            region_elem_by_id[rid] = textregion
+            region_elems.append(textregion)
 
-        line_parent = parent_region if parent_region is not None else page
+        # ponytail: default region for orphan lines when none exist. PAGE
+        # requires TextLine inside a TextRegion; emit one synthetic MainZone.
+        default_region: Optional[ET.Element] = None
+        if not region_elems:
+            default_region = ET.SubElement(page, "TextRegion")
+            default_region.set("id", "region_0")
+            default_region.set("custom", "structure {type:MainZone;}")
+            region_elem_by_id["region_0"] = default_region
+            region_elems.append(default_region)
 
+        def _line_cy(line: Dict[str, Any]) -> float:
+            bl = line.get("baseline") or []
+            return sum(p[1] for p in bl) / len(bl) if bl else 0.0
+
+        def _nearest_region_id(line: Dict[str, Any]) -> str:
+            # ponytail: nearest region by baseline midpoint vs region polygon
+            # centroid. Ceiling: O(lines*regions), fine for our plate scale
+            # (≤~50 regions, ≤~200 lines/plate). Upgrade to a spatial index
+            # if throughput matters.
+            if not ordered_regions:
+                return "region_0"
+            bl = line.get("baseline") or []
+            if not bl:
+                # fall back to boundary midpoint
+                bd = line.get("boundary") or []
+                bl = bd
+            if not bl:
+                # no geometry — first region
+                return str(ordered_regions[0].get("id", "region_0"))
+            lx = sum(p[0] for p in bl) / len(bl)
+            ly = sum(p[1] for p in bl) / len(bl)
+            best_rid, best_d = None, None
+            for r in ordered_regions:
+                poly = r.get("polygon") or []
+                if not poly:
+                    continue
+                rx = sum(p[0] for p in poly) / len(poly)
+                ry = sum(p[1] for p in poly) / len(poly)
+                d = (lx - rx) ** 2 + (ly - ry) ** 2
+                if best_d is None or d < best_d:
+                    best_d, best_rid = d, str(r.get("id"))
+            return best_rid or str(ordered_regions[0].get("id", "region_0"))
+
+        # Group lines by their region_id (resolve orphans by nearest centroid).
+        lines_by_region: Dict[str, List[Dict[str, Any]]] = {}
         for idx, line in enumerate(lines, start=1):
-            textline = ET.SubElement(line_parent, "TextLine")
-            textline.set("id", str(line.get("id", f"l{idx}")))
-            ltype = line.get("type", "DefaultLine")
-            textline.set("custom", f"structure {{type:{ltype};}}")
-            boundary = line.get("boundary") or line.get("polygon")
-            if boundary:
-                coords = ET.SubElement(textline, "Coords")
-                coords.set("points", _pts_to_str(boundary))
-            baseline = line.get("baseline")
-            if baseline:
-                bl = ET.SubElement(textline, "Baseline")
-                bl.set("points", _pts_to_str(baseline))
-            transcript = line.get("transcript", "")
-            if transcript:
-                textequiv = ET.SubElement(textline, "TextEquiv")
-                unicode = ET.SubElement(textequiv, "Unicode")
-                unicode.text = transcript
+            rid = line.get("region_id")
+            if not rid:
+                rid = _nearest_region_id(line)
+            elif rid not in region_elem_by_id:
+                # region_id points at a region that doesn't exist in state —
+                # re-resolve to nearest rather than dropping the line.
+                rid = _nearest_region_id(line)
+            lines_by_region.setdefault(str(rid), []).append(line)
+
+        # Emit lines inside their actual parent region, ordered top-to-bottom
+        # within the region (kraken handles RTL within-region order via
+        # text_direction; we keep document order top-to-bottom by baseline y).
+        for ridx, region in enumerate(ordered_regions, start=1):
+            rid = str(region.get("id", f"r{ridx}"))
+            parent = region_elem_by_id[rid]
+            for idx, line in enumerate(
+                sorted(lines_by_region.get(rid, []), key=_line_cy), start=1
+            ):
+                textline = ET.SubElement(parent, "TextLine")
+                textline.set("id", str(line.get("id", f"l{ridx}_{idx}")))
+                ltype = line.get("type", "DefaultLine")
+                textline.set("custom", f"structure {{type:{ltype};}}")
+                boundary = line.get("boundary") or line.get("polygon")
+                if boundary:
+                    coords = ET.SubElement(textline, "Coords")
+                    coords.set("points", _pts_to_str(boundary))
+                baseline = line.get("baseline")
+                if baseline:
+                    bl = ET.SubElement(textline, "Baseline")
+                    bl.set("points", _pts_to_str(baseline))
+                transcript = line.get("transcript", "")
+                if transcript:
+                    textequiv = ET.SubElement(textline, "TextEquiv")
+                    unicode = ET.SubElement(textequiv, "Unicode")
+                    unicode.text = transcript
+
+        # ponytail: <ReadingOrder> — top-to-bottom by region document order
+        # (kraken-fragmentary-manuscripts.md §4.2). regionRef matches the id
+        # we set on each TextRegion above. Synth default region included.
+        if region_elems:
+            ro = ET.SubElement(page, "ReadingOrder")
+            group = ET.SubElement(ro, "OrderedGroup")
+            group.set("id", "reading-order")
+            for i, relem in enumerate(region_elems):
+                ref = ET.SubElement(group, "RegionRefIndexed")
+                ref.set("index", str(i))
+                ref.set("regionRef", relem.get("id"))
 
         tree = ET.ElementTree(root)
         import io
