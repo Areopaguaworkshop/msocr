@@ -86,9 +86,11 @@ def _enrich_xml_with_polygons(src_xml: Path, image: Path, out_xml: Path, *, targ
     from PIL import Image
     from kraken.lib.segmentation import calculate_polygonal_environment
 
-    NS = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
     tree = ET.parse(str(src_xml))
     root = tree.getroot()
+    # ponytail: detect PAGE XML namespace from root tag (works for 2019 and 2013);
+    # fall back to 2019 only if root has no namespace (should not normally happen).
+    NS = root.tag.split("}")[0][1:] if root.tag.startswith("{") else "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
     page = root.find(f"{{{NS}}}Page")
     if page is None:
         raise ValueError(f"No <Page> in {src_xml}")
@@ -119,9 +121,12 @@ def _resolve_image_for_xml(src_xml: Path, hinted_image: Path | None) -> Path:
     if hinted_image and hinted_image.exists():
         return hinted_image
     import lxml.etree as ET
-    NS = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
     tree = ET.parse(str(src_xml))
-    page = tree.getroot().find(f"{{{NS}}}Page")
+    root = tree.getroot()
+    # ponytail: detect PAGE XML namespace from root tag (works for 2019 and 2013);
+    # fall back to 2019 only if root has no namespace (should not normally happen).
+    NS = root.tag.split("}")[0][1:] if root.tag.startswith("{") else "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
+    page = root.find(f"{{{NS}}}Page")
     if page is None:
         raise ValueError(f"No <Page> in {src_xml}")
     fname = page.get("imageFilename")
@@ -129,7 +134,22 @@ def _resolve_image_for_xml(src_xml: Path, hinted_image: Path | None) -> Path:
         raise ValueError(f"No imageFilename in {src_xml} and no image hint provided")
     p = src_xml.parent / fname
     if not p.exists():
-        raise FileNotFoundError(f"Image not found for {src_xml}: {p}")
+        # ponytail: case-insensitive fallback (MS Jer 36 XMLs may reference a
+        # different extension case than the file on disk), plus a sibling
+        # images/ directory lookup (Jer 36 stores images alongside page/, not
+        # in the same dir). Strict path kept first so c2av/Vienna unchanged.
+        target = fname.lower()
+        dirs = [src_xml.parent, src_xml.parent.parent / "images"]
+        match = None
+        for d in dirs:
+            if not d.is_dir():
+                continue
+            match = next((f for f in d.iterdir() if f.name.lower() == target), None)
+            if match is not None:
+                break
+        if match is None:
+            raise FileNotFoundError(f"Image not found for {src_xml}: {p}")
+        p = match
     return p
 
 
@@ -197,6 +217,11 @@ def walk_style_group(
 
     # Enrich each XML with polygon <Coords> (kraken 7.x requires them),
     # then upload XML + image to the pod. Train/val manifests list paths.
+    # ponytail: polygonization is ~1.1 min/folio CPU-bound serial — 128 folios
+    # = ~2.5h. Cache enriched XMLs by (xml_path, mtime, size, target_img_name)
+    # so re-runs skip the work. Cache lives under ~/.cache/msocr/poly_cache/.
+    cache_dir = Path.home() / ".cache" / "msocr" / "poly_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         train_manifest_lines: list[str] = []
@@ -208,9 +233,29 @@ def walk_style_group(
             if not c.xml_path:
                 continue
             image = _resolve_image_for_xml(c.xml_path, c.image)
-            enriched_xml = tmp_path / f"{part}_{idx}_poly.xml"
             remote_img_name = f"{part}_{idx}.png"
-            _enrich_xml_with_polygons(c.xml_path, image, enriched_xml, target_image_name=remote_img_name)
+            # ponytail: cache key — source xml path + mtime + size + target image
+            # name. If the source XML or image changes, the key changes and we
+            # re-polygonize. Idempotent: a hit returns the cached enriched file.
+            src_stat = c.xml_path.stat()
+            import hashlib
+            key_src = f"{c.xml_path}|{src_stat.st_mtime_ns}|{src_stat.st_size}|{remote_img_name}"
+            key = hashlib.sha1(key_src.encode()).hexdigest()
+            cached = cache_dir / f"{key}.xml"
+            enriched_xml = tmp_path / f"{part}_{idx}_poly.xml"
+            if cached.exists() and cached.stat().st_size > 0:
+                # ponytail: copy not rename — cache is on ~/.cache (home fs)
+                # but tmp is on a different filesystem (tmpfs/overlay), so
+                # os.replace raises EXDEV. copy + small read is cheaper than
+                # re-polygonizing ~1.1 min/folio.
+                enriched_xml.write_bytes(cached.read_bytes())
+            else:
+                _enrich_xml_with_polygons(c.xml_path, image, enriched_xml, target_image_name=remote_img_name)
+                # Write atomically: copy to a temp then rename, so a crash mid-
+                # write never leaves a partial cache entry.
+                tmp_cache = cached.with_suffix(".xml.tmp")
+                tmp_cache.write_bytes(enriched_xml.read_bytes())
+                tmp_cache.rename(cached)
             remote_xml = f"/workspace/{part}_{idx}.xml"
             remote_img = f"/workspace/{remote_img_name}"
             pre_train_upload.append((str(enriched_xml), remote_xml))

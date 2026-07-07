@@ -25,6 +25,10 @@ export interface Line {
   boundary: Point[];
   type: LineType;
   transcript: string;
+  // ponytail: per-line recognition confidence placeholder (0–1, null = not yet
+  // recognized). Tier 2 task will wire real values from /autosuggest; UI must
+  // not break if this field appears. (fix-a-v9-annotation-plan.md §9 #6.)
+  confidence?: number | null;
 }
 
 export interface AnnotationState {

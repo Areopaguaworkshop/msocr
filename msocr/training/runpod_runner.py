@@ -118,39 +118,40 @@ class RunPodRunner:
                     raise
                 time.sleep(30)
         cmd_str = shlex.join(cmd)
-        stdin, stdout, stderr = client.exec_command(cmd_str, timeout=timeout, get_pty=True)
-        # ponytail: get_pty=True merges stderr into stdout so we only read one
-        # channel. Without it, pip --quiet produces zero stdout and paramiko's
-        # blocking readline() wedges forever (observed 16+ min hang on
-        # `pip install kraken` after it had already finished).
-        #
-        # Robust drain: poll exit_status_ready() with a deadline, read any
-        # available stdout along the way. Never block on readline() alone —
-        # a quiet command that emits no final newline will block it forever
-        # even after the remote process has exited, if the PTY close races.
-        chan = stdout.channel
-        chan.settimeout(30)  # per-read timeout; overall deadline enforced below
+        # ponytail: no get_pty — on this pod image the PTY never EOFs for quiet
+        # commands (pip --quiet), so exit_status_ready() stays False forever and
+        # the poll loop wedges until the deadline. Without get_pty, paramiko
+        # returns separate stdout/stderr channels that EOF cleanly on process
+        # exit. We drain both non-blockingly below.
+        stdin, stdout, stderr = client.exec_command(cmd_str, timeout=timeout)
+        out_chan = stdout.channel
+        err_chan = stderr.channel
+        out_chan.settimeout(30)  # per-read timeout; overall deadline enforced below
+        err_chan.settimeout(30)
         deadline = time.monotonic() + timeout
         out_buf: list[str] = []
+        err_buf: list[str] = []
         while True:
-            # Drain any buffered stdout (non-blocking). recv_ready() returns
-            # immediately with False when nothing is queued, so we never wedge.
-            while chan.recv_ready():
-                chunk = chan.recv(65536).decode(errors="replace")
-                if chunk:
-                    sys.stdout.write(chunk)
-                    sys.stdout.flush()
-                    out_buf.append(chunk)
-
-            if chan.exit_status_ready():
-                # Final drain after exit (catches trailing output emitted
-                # between the last recv_ready() check and process exit).
-                while chan.recv_ready():
-                    chunk = chan.recv(65536).decode(errors="replace")
+            # Drain both channels non-blocking. recv_ready() returns False when
+            # nothing is queued, so we never wedge on a quiet command.
+            for ch, buf in ((out_chan, out_buf), (err_chan, err_buf)):
+                while ch.recv_ready():
+                    chunk = ch.recv(65536).decode(errors="replace")
                     if chunk:
                         sys.stdout.write(chunk)
                         sys.stdout.flush()
-                        out_buf.append(chunk)
+                        buf.append(chunk)
+
+            if out_chan.exit_status_ready():
+                # Final drain after exit (catches trailing output emitted
+                # between the last recv_ready() check and process exit).
+                for ch, buf in ((out_chan, out_buf), (err_chan, err_buf)):
+                    while ch.recv_ready():
+                        chunk = ch.recv(65536).decode(errors="replace")
+                        if chunk:
+                            sys.stdout.write(chunk)
+                            sys.stdout.flush()
+                            buf.append(chunk)
                 break
 
             if time.monotonic() >= deadline:
@@ -160,10 +161,14 @@ class RunPodRunner:
                 )
             time.sleep(0.2)
 
-        exit_status = chan.recv_exit_status()
+        exit_status = out_chan.recv_exit_status()
         client.close()
         if exit_status != 0:
-            raise RuntimeError(f"pod command failed (exit {exit_status}): {''.join(out_buf)[-2000:]}")
+            raise RuntimeError(
+                f"pod command failed (exit {exit_status}): "
+                f"stdout={''.join(out_buf)[-1000:]!r} "
+                f"stderr={''.join(err_buf)[-1000:]!r}"
+            )
         return "".join(out_buf)
 
     def download_artifact(self, pod_hostport: tuple[str, int], remote: str, local: str) -> None:

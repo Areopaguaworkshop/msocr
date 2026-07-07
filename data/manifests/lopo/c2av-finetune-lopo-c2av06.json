@@ -1,0 +1,108 @@
+{
+  "manifest_id": "c2av-finetune-lopo-c2av06",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
+  "script_block": "U+0710",
+  "script_variant": "christian-syriac-script",
+  "base_dir": "dataset/christian_sogdian_c2av",
+  "partitions": {
+    "train": [
+      {
+        "id": "c2av01-train",
+        "manuscript_id": "c2av01",
+        "xml_path": "gt/c2av01_page_01.xml"
+      },
+      {
+        "id": "c2av02-train",
+        "manuscript_id": "c2av02",
+        "xml_path": "gt/c2av02_page_02.xml"
+      },
+      {
+        "id": "c2av03-train",
+        "manuscript_id": "c2av03",
+        "xml_path": "gt/c2av03_page_03.xml"
+      },
+      {
+        "id": "c2av04-train",
+        "manuscript_id": "c2av04",
+        "xml_path": "gt/c2av04_page_04.xml"
+      },
+      {
+        "id": "c2av05-train",
+        "manuscript_id": "c2av05",
+        "xml_path": "gt/c2av05_page_05.xml"
+      },
+      {
+        "id": "c2av08-train",
+        "manuscript_id": "c2av08",
+        "xml_path": "gt/c2av08_page_08.xml"
+      },
+      {
+        "id": "c2av09-train",
+        "manuscript_id": "c2av09",
+        "xml_path": "gt/c2av09_page_09.xml"
+      },
+      {
+        "id": "c2av10-train",
+        "manuscript_id": "c2av10",
+        "xml_path": "gt/c2av10_page_10.xml"
+      },
+      {
+        "id": "c2av11-train",
+        "manuscript_id": "c2av11",
+        "xml_path": "gt/c2av11_page_11.xml"
+      },
+      {
+        "id": "c2av12-train",
+        "manuscript_id": "c2av12",
+        "xml_path": "gt/c2av12_page_12.xml"
+      }
+    ],
+    "validation": [
+      {
+        "id": "c2av07-val",
+        "manuscript_id": "c2av07",
+        "xml_path": "gt/c2av07_page_07.xml"
+      }
+    ],
+    "holdout": [
+      {
+        "id": "c2av06-holdout",
+        "manuscript_id": "c2av06",
+        "xml_path": "gt/c2av06_page_06.xml"
+      }
+    ]
+  },
+  "style_groups": {
+    "c2av-syriac-finetune": {
+      "manuscript_ids": [
+        "c2av01",
+        "c2av02",
+        "c2av03",
+        "c2av04",
+        "c2av05",
+        "c2av06",
+        "c2av07",
+        "c2av08",
+        "c2av09",
+        "c2av10",
+        "c2av11",
+        "c2av12"
+      ],
+      "description": "Real fine-tune from Sophro Mhiro Syriac base. 10 train plates (148 lines) / 1 val plate (15 lines) / 1 holdout plate (19 lines). Syriac-script output (25 chars: 20 in base codec + 5 NEW via --resize union: U+0741 qushshaya, U+0742 rukkakha, U+074D SOGDIAN ZHAIN, U+074E SOGDIAN KHAPH, U+074F SOGDIAN FE). Same-script fine-tune where 178 lines is viable.",
+      "base_model_override": "models/kraken/sophro_mhiro_syriac.safetensors"
+    }
+  },
+  "metadata": {
+    "plate_count": 12,
+    "train_lines": 148,
+    "val_lines": 15,
+    "holdout_lines": 19,
+    "source": "/home/ajiap/Documents/c2av01.xml - c2av12.xml",
+    "notes": "Fix A: Syriac-script fine-tune (Latin GT re-encoded 2026-07-04). --augment --freeze-backbone 500 --warmup 200 -r 5e-5 --resize union --quit early --min-epochs 20 --lag 10. 22 shared Syriac consonants preserve backbone transfer learning; 5 new classes learn from scratch. Expected CER 15-35% on holdout plate.",
+    "lopo_holdout": "c2av06",
+    "lopo_validation": "c2av07",
+    "lopo_train_count": 10,
+    "purpose": "leave-one-plate-out CV fold"
+  }
+}

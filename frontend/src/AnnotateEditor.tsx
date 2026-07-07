@@ -34,6 +34,9 @@ const SOGDIAN_CHARS = [
   "s", "ʿ", "p", "ṣ", "q", "r", "š", "t", "θ",
   "β", "γ", "δ", "x", "č", "ž", "ẓ", "ḣ",
   "ā", "ī", "ū", "ʾ", "ʿ",
+  // ponytail: U+0323 COMBINING DOT BELOW — Leiden underdot for uncertain glyphs
+  // (kraken-fragmentary-manuscripts.md §4.1). Combining char; applies to preceding base.
+  "◌̣",
 ];
 
 const REGION_TYPES: RegionType[] = [
@@ -129,6 +132,22 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   const [twoClickActive, setTwoClickActive] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [advanced, setAdvanced] = useState(false);
+  // ponytail: per-session read direction (fix-a-v9-annotation-plan.md §9 #5).
+  // Default horizontal-rl for Sogdian (kraken-fragmentary-manuscripts.md §4.2).
+  // Client-side only — backend wiring is a separate task (B).
+  const [readDirection, setReadDirection] = useState<"horizontal-rl" | "horizontal-lr">("horizontal-rl");
+  // ponytail: image rotation degrees for the OSD viewer (§9 #4). OSD also has
+  // its own showRotationControl buttons; this is an explicit app-level control.
+  const [rotation, setRotation] = useState(0);
+  // ponytail: keyboard-shortcut toggles (§9 #4). showMask = M, showOrder = L.
+  // Neither renders heavy UI — showOrder paints a small index on each baseline;
+  // showMask is a placeholder flag (no mask overlay implemented yet, YAGNI).
+  const [showMask, setShowMask] = useState(false);
+  const [showOrder, setShowOrder] = useState(false);
+  // ponytail: Ctrl+A select-all lines (§9 #4). Our model is single-selection, so
+  // this is a multi-select overlay: membership here highlights the row; clicking
+  // any line clears it. No batch ops wired yet — minimal per the plan.
+  const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set());
 
   const imageUrl = `/api/sessions/${sessionId}/image`;
 
@@ -187,6 +206,10 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               boundary: (l.boundary || []).map(normalizePoint),
               type: (LINE_COLORS[l.type as LineType] ? l.type : "DefaultLine") as LineType,
               transcript: l.transcript || "",
+              // ponytail: preserve confidence if the server/proxy sends it (§9 #6).
+              confidence: typeof (l as { confidence?: number | null }).confidence === "number"
+                ? (l as { confidence?: number | null }).confidence
+                : null,
             }))
             .filter((l) => l.baseline.length >= 2),
         );
@@ -396,6 +419,10 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             boundary: (l.boundary || []).map(normalizePoint),
             type: (LINE_COLORS[l.type as LineType] ? l.type : "DefaultLine") as LineType,
             transcript: l.transcript || "",
+            // ponytail: preserve confidence on XML import too (§9 #6).
+            confidence: typeof (l as { confidence?: number | null }).confidence === "number"
+              ? (l as { confidence?: number | null }).confidence
+              : null,
           }))
           .filter((l) => l.baseline.length >= 2),
       );
@@ -537,6 +564,27 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     markDirty();
   }
 
+  // ponytail: rotate the OSD viewport (§9 #4). OSD's viewport.setRotation takes
+  // absolute degrees. We keep `rotation` in state so the control stays in sync.
+  function setViewerRotation(deg: number) {
+    const v = viewerRef.current;
+    if (v) v.viewport.setRotation(deg);
+    setRotation(deg);
+  }
+
+  // ponytail: Ctrl+A select-all lines (§9 #4). Our model is single-selection,
+  // so this populates a multi-select overlay set; clicking any line clears it.
+  // No batch ops wired — minimal per the plan ("don't build new UI, just bind keys").
+  function selectAllLines() {
+    if (lines.length === 0) return;
+    setSelectedLineIds(new Set(lines.map((l) => l.id)));
+  }
+
+  // ponytail: M (mask toggle) — placeholder flag, no mask overlay rendered yet
+  // (§9 #4). YAGNI until a real mask layer is needed; the binding is reserved.
+  // ponytail: L (reading-order display toggle) — showOrder paints the index on
+  // each baseline when on (rendered in the SVG below).
+
   // keyboard
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -556,12 +604,30 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         return;
       }
       if (e.key === "v") setMode("navigate");
-      if (advanced && e.key === "r") setMode("region");
+      if (e.key === "r") setMode("region"); // ponytail: region mode now default-visible (§9 #2)
       if (e.key === "b") setMode("baseline");
-      if (e.key === "t") setMode("transcribe");
+      // ponytail: T is context-sensitive (§9 #4). In Region mode with a selected
+      // region, T assigns the current regionType to it (eScriptorium "type assign").
+      // Otherwise T switches to Transcribe (existing binding, preserved).
+      if (e.key === "t") {
+        if (mode === "region" && selected?.kind === "region") {
+          setRegions((items) =>
+            items.map((r) => (r.id === selected.id ? { ...r, type: regionType } : r)),
+          );
+          markDirty();
+        } else {
+          setMode("transcribe");
+        }
+      }
+      // ponytail: M = mask toggle (placeholder), L = reading-order display (§9 #4).
+      if (e.key === "m") setShowMask((v) => !v);
+      if (e.key === "l") setShowOrder((v) => !v);
       if (e.key === "Escape") { setDraftPoints([]); setTwoClickActive(false); }
       if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
       if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
+      // ponytail: Ctrl+A = select all lines (§9 #4). Prevent the browser default
+      // (select page text) so the binding is reliable outside the textarea.
+      if (e.ctrlKey && e.key.toLowerCase() === "a") { e.preventDefault(); selectAllLines(); }
       if (e.key === "ArrowDown" && selectedLineIndex >= 0) { e.preventDefault(); gotoLine(1); }
       if (e.key === "ArrowUp" && selectedLineIndex >= 0) { e.preventDefault(); gotoLine(-1); }
     };
@@ -658,7 +724,10 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     { mode: "baseline", label: "Baseline", icon: <ScribbleLoop size={16} />, hint: "B — click start, click end" },
     { mode: "transcribe", label: "Transcribe", icon: <TextAUnderline size={16} />, hint: "T — select a line to type" },
   ];
-  const visibleModes = advanced ? modes : modes.filter((m) => m.mode !== "region");
+  // ponytail: Region mode (incl. DamageZone) is default-visible — fragmentary
+  // folios need DamageZone for lacunae (kraken-fragmentary-manuscripts.md §4.1).
+  // The `advanced` toggle now only gates the stats line and help section.
+  const visibleModes = modes;
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -669,6 +738,17 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         <span className="text-xs text-stone-400">{stats}</span>
         <div className="flex-1" />
         <span className={`text-xs ${dirty ? "text-amber-600 dark:text-amber-400" : "text-stone-400"}`}>{status}</span>
+        {/* ponytail: per-session read direction (§9 #5). Default horizontal-rl
+            for Sogdian. Client-side only — backend wiring is a separate task (B). */}
+        <select
+          value={readDirection}
+          onChange={(e) => setReadDirection(e.target.value as "horizontal-rl" | "horizontal-lr")}
+          title="Per-session read direction (not yet saved to backend)"
+          className="text-xs rounded-lg border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-2 py-1"
+        >
+          <option value="horizontal-rl">RTL</option>
+          <option value="horizontal-lr">LTR</option>
+        </select>
         <button
           onClick={() => setAdvanced((v) => !v)}
           title="Toggle region annotation tools (not needed for Kraken training)"
@@ -783,6 +863,28 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
           >
             {regions.map((r) => renderShape("region", r))}
             {lines.map((l) => renderShape("line", l))}
+            {/* ponytail: L key reading-order display (§9 #4) — paint the array
+                index at each line's first baseline point when showOrder is on. */}
+            {showOrder && lines.map((l, i) => {
+              if (l.baseline.length === 0) return null;
+              const sp = imageToScreen(l.baseline[0]);
+              if (!sp) return null;
+              return (
+                <g key={`ord:${l.id}`}>
+                  <circle cx={sp[0]} cy={sp[1]} r={11} fill={ACCENT} opacity={0.85} />
+                  <text
+                    x={sp[0]} y={sp[1]} dy={4}
+                    textAnchor="middle"
+                    fontSize={11}
+                    fill="#fff"
+                    fontWeight={700}
+                    style={{ pointerEvents: "none", userSelect: "none" }}
+                  >
+                    {i + 1}
+                  </text>
+                </g>
+              );
+            })}
             {/* ponytail: vertex handles for the selected region in Region mode —
                 drag to nudge nodes; no insert/delete-vertex yet (YAGNI for small fixes). */}
             {mode === "region" && selected?.kind === "region" && (() => {
@@ -882,6 +984,35 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               </label>
             </div>
           )}
+          {/* ponytail: image rotation control (§9 #4). Calls OSD viewport.setRotation.
+              Bottom-right so it doesn't fight the top-left type palettes. OSD also
+              has its own rotation buttons (showRotationControl:true); this is explicit. */}
+          <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-white/90 dark:bg-stone-900/90 backdrop-blur p-1 rounded-lg border border-stone-200 dark:border-stone-800">
+            <button
+              onClick={() => setViewerRotation(rotation - 90)}
+              title="Rotate −90°"
+              className="w-7 h-7 flex items-center justify-center rounded text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-800 text-xs"
+            >
+              ↺90
+            </button>
+            <span className="text-[10px] tabular-nums text-stone-500 w-10 text-center" title="Current rotation (degrees)">
+              {rotation}°
+            </span>
+            <button
+              onClick={() => setViewerRotation(rotation + 90)}
+              title="Rotate +90°"
+              className="w-7 h-7 flex items-center justify-center rounded text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-800 text-xs"
+            >
+              ↻90
+            </button>
+            <button
+              onClick={() => setViewerRotation(0)}
+              title="Reset rotation to 0°"
+              className="w-7 h-7 flex items-center justify-center rounded text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-800 text-xs"
+            >
+              0°
+            </button>
+          </div>
         </main>
 
         {/* transcription panel */}
@@ -942,7 +1073,11 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
           <div className="flex-1 overflow-y-auto">
             <ol className="divide-y divide-stone-100 dark:divide-stone-800">
-              {lines.map((line, i) => (
+              {lines.map((line, i) => {
+                // ponytail: Ctrl+A select-all overlay (§9 #4) — highlight rows in
+                // the multi-select set; clicking any line clears it.
+                const inSelAll = selectedLineIds.has(line.id);
+                return (
                 <li
                   key={line.id}
                   draggable
@@ -950,9 +1085,13 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => { if (dragIndexRef.current !== null) reorderLine(dragIndexRef.current, i); dragIndexRef.current = null; }}
                   className={`p-2 cursor-pointer group ${
-                    selectedLine?.id === line.id ? "bg-accent/10" : "hover:bg-stone-100 dark:hover:bg-stone-900"
+                    selectedLine?.id === line.id
+                      ? "bg-accent/10"
+                      : inSelAll
+                        ? "bg-amber-50 dark:bg-amber-900/20"
+                        : "hover:bg-stone-100 dark:hover:bg-stone-900"
                   }`}
-                  onClick={() => selectLine(line.id, true)}
+                  onClick={() => { if (selectedLineIds.size > 0) setSelectedLineIds(new Set()); selectLine(line.id, true); }}
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-stone-400 w-5 shrink-0">{i + 1}</span>
@@ -963,13 +1102,29 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                     >
                       {line.type.replace(/Line$/, "")}
                     </span>
+                    {/* ponytail: per-line confidence placeholder (§9 #6). Shown
+                        only when a numeric confidence is present — Tier 2 wires
+                        real values. Color-coded: ≥0.9 green, ≥0.7 amber, else red. */}
+                    {typeof line.confidence === "number" && (
+                      <span
+                        className="text-[9px] font-mono px-1 rounded shrink-0 tabular-nums"
+                        title="Recognition confidence (0–1)"
+                        style={{
+                          color: line.confidence >= 0.9 ? "#16a34a"
+                            : line.confidence >= 0.7 ? "#ca8a04" : "#dc2626",
+                        }}
+                      >
+                        {(line.confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
                     <span className="text-[11px] text-stone-300 cursor-grab active:cursor-grabbing group-hover:text-stone-500 ml-auto" title="drag to reorder">⠿</span>
                   </div>
                   <div className="font-mono text-xs text-stone-700 dark:text-stone-300 mt-1 truncate text-left">
                     {line.transcript || <span className="italic text-stone-400">not transcribed</span>}
                   </div>
                 </li>
-              ))}
+                );
+              })}
             </ol>
           </div>
         </aside>
@@ -1001,7 +1156,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
             <h3 className="font-semibold mt-4 mb-2">Workflow</h3>
             <ol className="list-decimal pl-5 space-y-1 text-stone-700 dark:text-stone-300">
-              <li><b>Regions</b> (R, <i>Advanced</i>): optional — enclose text areas. Click points, double-click to close. Pick the right type from the top-left palette. <b>Not required for Kraken training.</b></li>
+              <li><b>Regions</b> (R): optional — enclose text areas. Click points, double-click to close. Pick the right type from the top-left palette (DamageZone is now default-visible for fragmentary folios). <b>Not required for Kraken training.</b></li>
               <li><b>Baselines</b> (B): the reading line under each line of text. Click start, click end — that's it.</li>
               <li><b>Transcribe</b> (T): select a baseline, type the Sogdian text (Sims-Williams Latin transliteration) in the right panel. Press <code>Enter</code> to save and jump to the next line.</li>
               <li><b>Export</b>: click <i>PAGE XML</i> in the top bar to download for Kraken training.</li>
@@ -1010,9 +1165,9 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             <h3 className="font-semibold mt-4 mb-2">Modes</h3>
             <ul className="space-y-1 text-stone-700 dark:text-stone-300">
               <li><b>Navigate</b> (V) — pan and zoom the image. Hover any label for a 3-second tooltip.</li>
-              <li><b>Region</b> (R, <i>Advanced</i>) — draw region polygons. Top-left palette picks the type.</li>
+              <li><b>Region</b> (R) — draw region polygons. Top-left palette picks the type (incl. DamageZone).</li>
               <li><b>Baseline</b> (B) — 2-click to draw a baseline. Top-left palette picks the line type.</li>
-              <li><b>Transcribe</b> (T) — type the Sims-Williams Latin transliteration in the right panel. Use the character palette below the textarea for aleph, ayin, dotted/special letters.</li>
+              <li><b>Transcribe</b> (T) — type the Sims-Williams Latin transliteration in the right panel. Use the character palette below the textarea for aleph, ayin, dotted/special letters, and the Leiden underdot (U+0323) for uncertain glyphs.</li>
             </ul>
 
             {advanced && (<>
@@ -1037,7 +1192,11 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
             <h3 className="font-semibold mt-4 mb-2">Keyboard</h3>
             <ul className="space-y-1 text-stone-700 dark:text-stone-300">
-              <li><kbd>V</kbd> / <kbd>B</kbd> / <kbd>T</kbd> — switch modes <span className="text-stone-400">(R for regions, Advanced only)</span></li>
+              <li><kbd>V</kbd> / <kbd>R</kbd> / <kbd>B</kbd> / <kbd>T</kbd> — switch modes (Navigate / Region / Baseline / Transcribe)</li>
+              <li><kbd>T</kbd> in Region mode with a region selected — assign the current region type (eScriptorium "type assign")</li>
+              <li><kbd>M</kbd> — toggle mask overlay (placeholder; no mask layer yet)</li>
+              <li><kbd>L</kbd> — toggle reading-order display (number badges on baselines)</li>
+              <li><kbd>Ctrl</kbd>+<kbd>A</kbd> — select all lines (highlight in the right panel; click any line to clear)</li>
               <li><kbd>Enter</kbd> (in textarea) — save + next line</li>
               <li><kbd>Ctrl</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd> — previous / next line</li>
               <li><kbd>↑</kbd> / <kbd>↓</kbd> (no modifier) — previous / next line</li>

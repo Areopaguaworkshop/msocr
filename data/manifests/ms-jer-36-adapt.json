@@ -1,0 +1,827 @@
+{
+  "manifest_id": "ms-jer-36-adapt",
+  "writing_mode": "handwritten",
+  "language": "sogdian",
+  "script_block": "U+0710",
+  "script_variant": "eastern-syriac-script",
+  "base_dir": "dataset/ms_jer_36",
+  "partitions": {
+    "train": [
+      {
+        "id": "0001_SMMJ_00036__006",
+        "manuscript_id": "msjer36-t006",
+        "xml_path": "page/0001_SMMJ_00036__006.xml"
+      },
+      {
+        "id": "0002_SMMJ_00036__007",
+        "manuscript_id": "msjer36-t007",
+        "xml_path": "page/0002_SMMJ_00036__007.xml"
+      },
+      {
+        "id": "0003_SMMJ_00036__008",
+        "manuscript_id": "msjer36-t008",
+        "xml_path": "page/0003_SMMJ_00036__008.xml"
+      },
+      {
+        "id": "0004_SMMJ_00036__009",
+        "manuscript_id": "msjer36-t009",
+        "xml_path": "page/0004_SMMJ_00036__009.xml"
+      },
+      {
+        "id": "0005_SMMJ_00036__010",
+        "manuscript_id": "msjer36-t010",
+        "xml_path": "page/0005_SMMJ_00036__010.xml"
+      },
+      {
+        "id": "0006_SMMJ_00036__011",
+        "manuscript_id": "msjer36-t011",
+        "xml_path": "page/0006_SMMJ_00036__011.xml"
+      },
+      {
+        "id": "0007_SMMJ_00036__012",
+        "manuscript_id": "msjer36-t012",
+        "xml_path": "page/0007_SMMJ_00036__012.xml"
+      },
+      {
+        "id": "0008_SMMJ_00036__013",
+        "manuscript_id": "msjer36-t013",
+        "xml_path": "page/0008_SMMJ_00036__013.xml"
+      },
+      {
+        "id": "0009_SMMJ_00036__014",
+        "manuscript_id": "msjer36-t014",
+        "xml_path": "page/0009_SMMJ_00036__014.xml"
+      },
+      {
+        "id": "0010_SMMJ_00036__015",
+        "manuscript_id": "msjer36-t015",
+        "xml_path": "page/0010_SMMJ_00036__015.xml"
+      },
+      {
+        "id": "0013_SMMJ_00036__018",
+        "manuscript_id": "msjer36-t018",
+        "xml_path": "page/0013_SMMJ_00036__018.xml"
+      },
+      {
+        "id": "0014_SMMJ_00036__019",
+        "manuscript_id": "msjer36-t019",
+        "xml_path": "page/0014_SMMJ_00036__019.xml"
+      },
+      {
+        "id": "0019_SMMJ_00036__024",
+        "manuscript_id": "msjer36-t024",
+        "xml_path": "page/0019_SMMJ_00036__024.xml"
+      },
+      {
+        "id": "0020_SMMJ_00036__025",
+        "manuscript_id": "msjer36-t025",
+        "xml_path": "page/0020_SMMJ_00036__025.xml"
+      },
+      {
+        "id": "0021_SMMJ_00036__026",
+        "manuscript_id": "msjer36-t026",
+        "xml_path": "page/0021_SMMJ_00036__026.xml"
+      },
+      {
+        "id": "0022_SMMJ_00036__027",
+        "manuscript_id": "msjer36-t027",
+        "xml_path": "page/0022_SMMJ_00036__027.xml"
+      },
+      {
+        "id": "0027_SMMJ_00036__032",
+        "manuscript_id": "msjer36-t032",
+        "xml_path": "page/0027_SMMJ_00036__032.xml"
+      },
+      {
+        "id": "0028_SMMJ_00036__033",
+        "manuscript_id": "msjer36-t033",
+        "xml_path": "page/0028_SMMJ_00036__033.xml"
+      },
+      {
+        "id": "0029_SMMJ_00036__034",
+        "manuscript_id": "msjer36-t034",
+        "xml_path": "page/0029_SMMJ_00036__034.xml"
+      },
+      {
+        "id": "0030_SMMJ_00036__035",
+        "manuscript_id": "msjer36-t035",
+        "xml_path": "page/0030_SMMJ_00036__035.xml"
+      },
+      {
+        "id": "0031_SMMJ_00036__036",
+        "manuscript_id": "msjer36-t036",
+        "xml_path": "page/0031_SMMJ_00036__036.xml"
+      },
+      {
+        "id": "0032_SMMJ_00036__037",
+        "manuscript_id": "msjer36-t037",
+        "xml_path": "page/0032_SMMJ_00036__037.xml"
+      },
+      {
+        "id": "0033_SMMJ_00036__038",
+        "manuscript_id": "msjer36-t038",
+        "xml_path": "page/0033_SMMJ_00036__038.xml"
+      },
+      {
+        "id": "0034_SMMJ_00036__039",
+        "manuscript_id": "msjer36-t039",
+        "xml_path": "page/0034_SMMJ_00036__039.xml"
+      },
+      {
+        "id": "0035_SMMJ_00036__040",
+        "manuscript_id": "msjer36-t040",
+        "xml_path": "page/0035_SMMJ_00036__040.xml"
+      },
+      {
+        "id": "0036_SMMJ_00036__041",
+        "manuscript_id": "msjer36-t041",
+        "xml_path": "page/0036_SMMJ_00036__041.xml"
+      },
+      {
+        "id": "0037_SMMJ_00036__042",
+        "manuscript_id": "msjer36-t042",
+        "xml_path": "page/0037_SMMJ_00036__042.xml"
+      },
+      {
+        "id": "0048_SMMJ_00036__053",
+        "manuscript_id": "msjer36-t053",
+        "xml_path": "page/0048_SMMJ_00036__053.xml"
+      },
+      {
+        "id": "0049_SMMJ_00036__054",
+        "manuscript_id": "msjer36-t054",
+        "xml_path": "page/0049_SMMJ_00036__054.xml"
+      },
+      {
+        "id": "0050_SMMJ_00036__055",
+        "manuscript_id": "msjer36-t055",
+        "xml_path": "page/0050_SMMJ_00036__055.xml"
+      },
+      {
+        "id": "0051_SMMJ_00036__056",
+        "manuscript_id": "msjer36-t056",
+        "xml_path": "page/0051_SMMJ_00036__056.xml"
+      },
+      {
+        "id": "0052_SMMJ_00036__057",
+        "manuscript_id": "msjer36-t057",
+        "xml_path": "page/0052_SMMJ_00036__057.xml"
+      },
+      {
+        "id": "0053_SMMJ_00036__058",
+        "manuscript_id": "msjer36-t058",
+        "xml_path": "page/0053_SMMJ_00036__058.xml"
+      },
+      {
+        "id": "0054_SMMJ_00036__059",
+        "manuscript_id": "msjer36-t059",
+        "xml_path": "page/0054_SMMJ_00036__059.xml"
+      },
+      {
+        "id": "0055_SMMJ_00036__060",
+        "manuscript_id": "msjer36-t060",
+        "xml_path": "page/0055_SMMJ_00036__060.xml"
+      },
+      {
+        "id": "0056_SMMJ_00036__061",
+        "manuscript_id": "msjer36-t061",
+        "xml_path": "page/0056_SMMJ_00036__061.xml"
+      },
+      {
+        "id": "0067_SMMJ_00036__072",
+        "manuscript_id": "msjer36-t072",
+        "xml_path": "page/0067_SMMJ_00036__072.xml"
+      },
+      {
+        "id": "0068_SMMJ_00036__073",
+        "manuscript_id": "msjer36-t073",
+        "xml_path": "page/0068_SMMJ_00036__073.xml"
+      },
+      {
+        "id": "0069_SMMJ_00036__074",
+        "manuscript_id": "msjer36-t074",
+        "xml_path": "page/0069_SMMJ_00036__074.xml"
+      },
+      {
+        "id": "0070_SMMJ_00036__075",
+        "manuscript_id": "msjer36-t075",
+        "xml_path": "page/0070_SMMJ_00036__075.xml"
+      },
+      {
+        "id": "0071_SMMJ_00036__076",
+        "manuscript_id": "msjer36-t076",
+        "xml_path": "page/0071_SMMJ_00036__076.xml"
+      },
+      {
+        "id": "0072_SMMJ_00036__077",
+        "manuscript_id": "msjer36-t077",
+        "xml_path": "page/0072_SMMJ_00036__077.xml"
+      },
+      {
+        "id": "0073_SMMJ_00036__078",
+        "manuscript_id": "msjer36-t078",
+        "xml_path": "page/0073_SMMJ_00036__078.xml"
+      },
+      {
+        "id": "0074_SMMJ_00036__079",
+        "manuscript_id": "msjer36-t079",
+        "xml_path": "page/0074_SMMJ_00036__079.xml"
+      },
+      {
+        "id": "0086_SMMJ_00036__091",
+        "manuscript_id": "msjer36-t091",
+        "xml_path": "page/0086_SMMJ_00036__091.xml"
+      },
+      {
+        "id": "0087_SMMJ_00036__092",
+        "manuscript_id": "msjer36-t092",
+        "xml_path": "page/0087_SMMJ_00036__092.xml"
+      },
+      {
+        "id": "0088_SMMJ_00036__093",
+        "manuscript_id": "msjer36-t093",
+        "xml_path": "page/0088_SMMJ_00036__093.xml"
+      },
+      {
+        "id": "0089_SMMJ_00036__094",
+        "manuscript_id": "msjer36-t094",
+        "xml_path": "page/0089_SMMJ_00036__094.xml"
+      },
+      {
+        "id": "0090_SMMJ_00036__095",
+        "manuscript_id": "msjer36-t095",
+        "xml_path": "page/0090_SMMJ_00036__095.xml"
+      },
+      {
+        "id": "0091_SMMJ_00036__096",
+        "manuscript_id": "msjer36-t096",
+        "xml_path": "page/0091_SMMJ_00036__096.xml"
+      },
+      {
+        "id": "0092_SMMJ_00036__097",
+        "manuscript_id": "msjer36-t097",
+        "xml_path": "page/0092_SMMJ_00036__097.xml"
+      },
+      {
+        "id": "0093_SMMJ_00036__098",
+        "manuscript_id": "msjer36-t098",
+        "xml_path": "page/0093_SMMJ_00036__098.xml"
+      },
+      {
+        "id": "0094_SMMJ_00036__099",
+        "manuscript_id": "msjer36-t099",
+        "xml_path": "page/0094_SMMJ_00036__099.xml"
+      },
+      {
+        "id": "0095_SMMJ_00036__100",
+        "manuscript_id": "msjer36-t100",
+        "xml_path": "page/0095_SMMJ_00036__100.xml"
+      },
+      {
+        "id": "0096_SMMJ_00036__101",
+        "manuscript_id": "msjer36-t101",
+        "xml_path": "page/0096_SMMJ_00036__101.xml"
+      },
+      {
+        "id": "0097_SMMJ_00036__102",
+        "manuscript_id": "msjer36-t102",
+        "xml_path": "page/0097_SMMJ_00036__102.xml"
+      },
+      {
+        "id": "0098_SMMJ_00036__103",
+        "manuscript_id": "msjer36-t103",
+        "xml_path": "page/0098_SMMJ_00036__103.xml"
+      },
+      {
+        "id": "0099_SMMJ_00036__104",
+        "manuscript_id": "msjer36-t104",
+        "xml_path": "page/0099_SMMJ_00036__104.xml"
+      },
+      {
+        "id": "0100_SMMJ_00036__105",
+        "manuscript_id": "msjer36-t105",
+        "xml_path": "page/0100_SMMJ_00036__105.xml"
+      },
+      {
+        "id": "0101_SMMJ_00036__106",
+        "manuscript_id": "msjer36-t106",
+        "xml_path": "page/0101_SMMJ_00036__106.xml"
+      },
+      {
+        "id": "0102_SMMJ_00036__107",
+        "manuscript_id": "msjer36-t107",
+        "xml_path": "page/0102_SMMJ_00036__107.xml"
+      },
+      {
+        "id": "0103_SMMJ_00036__108",
+        "manuscript_id": "msjer36-t108",
+        "xml_path": "page/0103_SMMJ_00036__108.xml"
+      },
+      {
+        "id": "0104_SMMJ_00036__109",
+        "manuscript_id": "msjer36-t109",
+        "xml_path": "page/0104_SMMJ_00036__109.xml"
+      },
+      {
+        "id": "0105_SMMJ_00036__110",
+        "manuscript_id": "msjer36-t110",
+        "xml_path": "page/0105_SMMJ_00036__110.xml"
+      },
+      {
+        "id": "0124_SMMJ_00036__129",
+        "manuscript_id": "msjer36-t129",
+        "xml_path": "page/0124_SMMJ_00036__129.xml"
+      },
+      {
+        "id": "0125_SMMJ_00036__130",
+        "manuscript_id": "msjer36-t130",
+        "xml_path": "page/0125_SMMJ_00036__130.xml"
+      },
+      {
+        "id": "0126_SMMJ_00036__131",
+        "manuscript_id": "msjer36-t131",
+        "xml_path": "page/0126_SMMJ_00036__131.xml"
+      },
+      {
+        "id": "0127_SMMJ_00036__132",
+        "manuscript_id": "msjer36-t132",
+        "xml_path": "page/0127_SMMJ_00036__132.xml"
+      },
+      {
+        "id": "0128_SMMJ_00036__133",
+        "manuscript_id": "msjer36-t133",
+        "xml_path": "page/0128_SMMJ_00036__133.xml"
+      },
+      {
+        "id": "0129_SMMJ_00036__134",
+        "manuscript_id": "msjer36-t134",
+        "xml_path": "page/0129_SMMJ_00036__134.xml"
+      },
+      {
+        "id": "0130_SMMJ_00036__135",
+        "manuscript_id": "msjer36-t135",
+        "xml_path": "page/0130_SMMJ_00036__135.xml"
+      },
+      {
+        "id": "0131_SMMJ_00036__136",
+        "manuscript_id": "msjer36-t136",
+        "xml_path": "page/0131_SMMJ_00036__136.xml"
+      },
+      {
+        "id": "0132_SMMJ_00036__137",
+        "manuscript_id": "msjer36-t137",
+        "xml_path": "page/0132_SMMJ_00036__137.xml"
+      },
+      {
+        "id": "0133_SMMJ_00036__138",
+        "manuscript_id": "msjer36-t138",
+        "xml_path": "page/0133_SMMJ_00036__138.xml"
+      },
+      {
+        "id": "0134_SMMJ_00036__139",
+        "manuscript_id": "msjer36-t139",
+        "xml_path": "page/0134_SMMJ_00036__139.xml"
+      },
+      {
+        "id": "0135_SMMJ_00036__140",
+        "manuscript_id": "msjer36-t140",
+        "xml_path": "page/0135_SMMJ_00036__140.xml"
+      },
+      {
+        "id": "0136_SMMJ_00036__141",
+        "manuscript_id": "msjer36-t141",
+        "xml_path": "page/0136_SMMJ_00036__141.xml"
+      },
+      {
+        "id": "0137_SMMJ_00036__142",
+        "manuscript_id": "msjer36-t142",
+        "xml_path": "page/0137_SMMJ_00036__142.xml"
+      },
+      {
+        "id": "0138_SMMJ_00036__143",
+        "manuscript_id": "msjer36-t143",
+        "xml_path": "page/0138_SMMJ_00036__143.xml"
+      },
+      {
+        "id": "0139_SMMJ_00036__144",
+        "manuscript_id": "msjer36-t144",
+        "xml_path": "page/0139_SMMJ_00036__144.xml"
+      },
+      {
+        "id": "0141_SMMJ_00036__146",
+        "manuscript_id": "msjer36-t146",
+        "xml_path": "page/0141_SMMJ_00036__146.xml"
+      },
+      {
+        "id": "0142_SMMJ_00036__147",
+        "manuscript_id": "msjer36-t147",
+        "xml_path": "page/0142_SMMJ_00036__147.xml"
+      },
+      {
+        "id": "0180_SMMJ_00036__185",
+        "manuscript_id": "msjer36-t185",
+        "xml_path": "page/0180_SMMJ_00036__185.xml"
+      },
+      {
+        "id": "0181_SMMJ_00036__186",
+        "manuscript_id": "msjer36-t186",
+        "xml_path": "page/0181_SMMJ_00036__186.xml"
+      },
+      {
+        "id": "0182_SMMJ_00036__187",
+        "manuscript_id": "msjer36-t187",
+        "xml_path": "page/0182_SMMJ_00036__187.xml"
+      },
+      {
+        "id": "0198_SMMJ_00036__203",
+        "manuscript_id": "msjer36-t203",
+        "xml_path": "page/0198_SMMJ_00036__203.xml"
+      },
+      {
+        "id": "0199_SMMJ_00036__204",
+        "manuscript_id": "msjer36-t204",
+        "xml_path": "page/0199_SMMJ_00036__204.xml"
+      },
+      {
+        "id": "0200_SMMJ_00036__205",
+        "manuscript_id": "msjer36-t205",
+        "xml_path": "page/0200_SMMJ_00036__205.xml"
+      },
+      {
+        "id": "0201_SMMJ_00036__206",
+        "manuscript_id": "msjer36-t206",
+        "xml_path": "page/0201_SMMJ_00036__206.xml"
+      },
+      {
+        "id": "0202_SMMJ_00036__207",
+        "manuscript_id": "msjer36-t207",
+        "xml_path": "page/0202_SMMJ_00036__207.xml"
+      },
+      {
+        "id": "0203_SMMJ_00036__208",
+        "manuscript_id": "msjer36-t208",
+        "xml_path": "page/0203_SMMJ_00036__208.xml"
+      },
+      {
+        "id": "0204_SMMJ_00036__209",
+        "manuscript_id": "msjer36-t209",
+        "xml_path": "page/0204_SMMJ_00036__209.xml"
+      },
+      {
+        "id": "0205_SMMJ_00036__210",
+        "manuscript_id": "msjer36-t210",
+        "xml_path": "page/0205_SMMJ_00036__210.xml"
+      },
+      {
+        "id": "0206_SMMJ_00036__211",
+        "manuscript_id": "msjer36-t211",
+        "xml_path": "page/0206_SMMJ_00036__211.xml"
+      },
+      {
+        "id": "0207_SMMJ_00036__212",
+        "manuscript_id": "msjer36-t212",
+        "xml_path": "page/0207_SMMJ_00036__212.xml"
+      },
+      {
+        "id": "0208_SMMJ_00036__213",
+        "manuscript_id": "msjer36-t213",
+        "xml_path": "page/0208_SMMJ_00036__213.xml"
+      },
+      {
+        "id": "0209_SMMJ_00036__214",
+        "manuscript_id": "msjer36-t214",
+        "xml_path": "page/0209_SMMJ_00036__214.xml"
+      },
+      {
+        "id": "0210_SMMJ_00036__215",
+        "manuscript_id": "msjer36-t215",
+        "xml_path": "page/0210_SMMJ_00036__215.xml"
+      },
+      {
+        "id": "0211_SMMJ_00036__216",
+        "manuscript_id": "msjer36-t216",
+        "xml_path": "page/0211_SMMJ_00036__216.xml"
+      },
+      {
+        "id": "0212_SMMJ_00036__217",
+        "manuscript_id": "msjer36-t217",
+        "xml_path": "page/0212_SMMJ_00036__217.xml"
+      },
+      {
+        "id": "0213_SMMJ_00036__218",
+        "manuscript_id": "msjer36-t218",
+        "xml_path": "page/0213_SMMJ_00036__218.xml"
+      },
+      {
+        "id": "0216_SMMJ_00036__221",
+        "manuscript_id": "msjer36-t221",
+        "xml_path": "page/0216_SMMJ_00036__221.xml"
+      },
+      {
+        "id": "0217_SMMJ_00036__222",
+        "manuscript_id": "msjer36-t222",
+        "xml_path": "page/0217_SMMJ_00036__222.xml"
+      },
+      {
+        "id": "0218_SMMJ_00036__223",
+        "manuscript_id": "msjer36-t223",
+        "xml_path": "page/0218_SMMJ_00036__223.xml"
+      },
+      {
+        "id": "0219_SMMJ_00036__224",
+        "manuscript_id": "msjer36-t224",
+        "xml_path": "page/0219_SMMJ_00036__224.xml"
+      },
+      {
+        "id": "0220_SMMJ_00036__225",
+        "manuscript_id": "msjer36-t225",
+        "xml_path": "page/0220_SMMJ_00036__225.xml"
+      },
+      {
+        "id": "0221_SMMJ_00036__226",
+        "manuscript_id": "msjer36-t226",
+        "xml_path": "page/0221_SMMJ_00036__226.xml"
+      },
+      {
+        "id": "0222_SMMJ_00036__227",
+        "manuscript_id": "msjer36-t227",
+        "xml_path": "page/0222_SMMJ_00036__227.xml"
+      },
+      {
+        "id": "0223_SMMJ_00036__228",
+        "manuscript_id": "msjer36-t228",
+        "xml_path": "page/0223_SMMJ_00036__228.xml"
+      },
+      {
+        "id": "0224_SMMJ_00036__229",
+        "manuscript_id": "msjer36-t229",
+        "xml_path": "page/0224_SMMJ_00036__229.xml"
+      },
+      {
+        "id": "0225_SMMJ_00036__230",
+        "manuscript_id": "msjer36-t230",
+        "xml_path": "page/0225_SMMJ_00036__230.xml"
+      },
+      {
+        "id": "0226_SMMJ_00036__231",
+        "manuscript_id": "msjer36-t231",
+        "xml_path": "page/0226_SMMJ_00036__231.xml"
+      },
+      {
+        "id": "0227_SMMJ_00036__232",
+        "manuscript_id": "msjer36-t232",
+        "xml_path": "page/0227_SMMJ_00036__232.xml"
+      },
+      {
+        "id": "0228_SMMJ_00036__233",
+        "manuscript_id": "msjer36-t233",
+        "xml_path": "page/0228_SMMJ_00036__233.xml"
+      },
+      {
+        "id": "0229_SMMJ_00036__234",
+        "manuscript_id": "msjer36-t234",
+        "xml_path": "page/0229_SMMJ_00036__234.xml"
+      },
+      {
+        "id": "0230_SMMJ_00036__235",
+        "manuscript_id": "msjer36-t235",
+        "xml_path": "page/0230_SMMJ_00036__235.xml"
+      },
+      {
+        "id": "0231_SMMJ_00036__236",
+        "manuscript_id": "msjer36-t236",
+        "xml_path": "page/0231_SMMJ_00036__236.xml"
+      },
+      {
+        "id": "0232_SMMJ_00036__237",
+        "manuscript_id": "msjer36-t237",
+        "xml_path": "page/0232_SMMJ_00036__237.xml"
+      },
+      {
+        "id": "0233_SMMJ_00036__238",
+        "manuscript_id": "msjer36-t238",
+        "xml_path": "page/0233_SMMJ_00036__238.xml"
+      },
+      {
+        "id": "0234_SMMJ_00036__239",
+        "manuscript_id": "msjer36-t239",
+        "xml_path": "page/0234_SMMJ_00036__239.xml"
+      }
+    ],
+    "validation": [
+      {
+        "id": "0257_SMMJ_00036__262",
+        "manuscript_id": "msjer36-v262",
+        "xml_path": "page/0257_SMMJ_00036__262.xml"
+      },
+      {
+        "id": "0258_SMMJ_00036__263",
+        "manuscript_id": "msjer36-v263",
+        "xml_path": "page/0258_SMMJ_00036__263.xml"
+      },
+      {
+        "id": "0259_SMMJ_00036__264",
+        "manuscript_id": "msjer36-v264",
+        "xml_path": "page/0259_SMMJ_00036__264.xml"
+      },
+      {
+        "id": "0260_SMMJ_00036__265",
+        "manuscript_id": "msjer36-v265",
+        "xml_path": "page/0260_SMMJ_00036__265.xml"
+      },
+      {
+        "id": "0261_SMMJ_00036__266",
+        "manuscript_id": "msjer36-v266",
+        "xml_path": "page/0261_SMMJ_00036__266.xml"
+      },
+      {
+        "id": "0262_SMMJ_00036__267",
+        "manuscript_id": "msjer36-v267",
+        "xml_path": "page/0262_SMMJ_00036__267.xml"
+      },
+      {
+        "id": "0263_SMMJ_00036__268",
+        "manuscript_id": "msjer36-v268",
+        "xml_path": "page/0263_SMMJ_00036__268.xml"
+      },
+      {
+        "id": "0264_SMMJ_00036__269",
+        "manuscript_id": "msjer36-v269",
+        "xml_path": "page/0264_SMMJ_00036__269.xml"
+      }
+    ],
+    "holdout": [
+      {
+        "id": "0265_SMMJ_00036__270",
+        "manuscript_id": "msjer36-h270",
+        "xml_path": "page/0265_SMMJ_00036__270.xml"
+      },
+      {
+        "id": "0266_SMMJ_00036__271",
+        "manuscript_id": "msjer36-h271",
+        "xml_path": "page/0266_SMMJ_00036__271.xml"
+      },
+      {
+        "id": "0267_SMMJ_00036__272",
+        "manuscript_id": "msjer36-h272",
+        "xml_path": "page/0267_SMMJ_00036__272.xml"
+      },
+      {
+        "id": "0268_SMMJ_00036__273",
+        "manuscript_id": "msjer36-h273",
+        "xml_path": "page/0268_SMMJ_00036__273.xml"
+      },
+      {
+        "id": "0269_SMMJ_00036__274",
+        "manuscript_id": "msjer36-h274",
+        "xml_path": "page/0269_SMMJ_00036__274.xml"
+      }
+    ]
+  },
+  "style_groups": {
+    "jer36-adapt": {
+      "manuscript_ids": [
+        "msjer36-t006",
+        "msjer36-t007",
+        "msjer36-t008",
+        "msjer36-t009",
+        "msjer36-t010",
+        "msjer36-t011",
+        "msjer36-t012",
+        "msjer36-t013",
+        "msjer36-t014",
+        "msjer36-t015",
+        "msjer36-t018",
+        "msjer36-t019",
+        "msjer36-t024",
+        "msjer36-t025",
+        "msjer36-t026",
+        "msjer36-t027",
+        "msjer36-t032",
+        "msjer36-t033",
+        "msjer36-t034",
+        "msjer36-t035",
+        "msjer36-t036",
+        "msjer36-t037",
+        "msjer36-t038",
+        "msjer36-t039",
+        "msjer36-t040",
+        "msjer36-t041",
+        "msjer36-t042",
+        "msjer36-t053",
+        "msjer36-t054",
+        "msjer36-t055",
+        "msjer36-t056",
+        "msjer36-t057",
+        "msjer36-t058",
+        "msjer36-t059",
+        "msjer36-t060",
+        "msjer36-t061",
+        "msjer36-t072",
+        "msjer36-t073",
+        "msjer36-t074",
+        "msjer36-t075",
+        "msjer36-t076",
+        "msjer36-t077",
+        "msjer36-t078",
+        "msjer36-t079",
+        "msjer36-t091",
+        "msjer36-t092",
+        "msjer36-t093",
+        "msjer36-t094",
+        "msjer36-t095",
+        "msjer36-t096",
+        "msjer36-t097",
+        "msjer36-t098",
+        "msjer36-t099",
+        "msjer36-t100",
+        "msjer36-t101",
+        "msjer36-t102",
+        "msjer36-t103",
+        "msjer36-t104",
+        "msjer36-t105",
+        "msjer36-t106",
+        "msjer36-t107",
+        "msjer36-t108",
+        "msjer36-t109",
+        "msjer36-t110",
+        "msjer36-t129",
+        "msjer36-t130",
+        "msjer36-t131",
+        "msjer36-t132",
+        "msjer36-t133",
+        "msjer36-t134",
+        "msjer36-t135",
+        "msjer36-t136",
+        "msjer36-t137",
+        "msjer36-t138",
+        "msjer36-t139",
+        "msjer36-t140",
+        "msjer36-t141",
+        "msjer36-t142",
+        "msjer36-t143",
+        "msjer36-t144",
+        "msjer36-t146",
+        "msjer36-t147",
+        "msjer36-t185",
+        "msjer36-t186",
+        "msjer36-t187",
+        "msjer36-t203",
+        "msjer36-t204",
+        "msjer36-t205",
+        "msjer36-t206",
+        "msjer36-t207",
+        "msjer36-t208",
+        "msjer36-t209",
+        "msjer36-t210",
+        "msjer36-t211",
+        "msjer36-t212",
+        "msjer36-t213",
+        "msjer36-t214",
+        "msjer36-t215",
+        "msjer36-t216",
+        "msjer36-t217",
+        "msjer36-t218",
+        "msjer36-t221",
+        "msjer36-t222",
+        "msjer36-t223",
+        "msjer36-t224",
+        "msjer36-t225",
+        "msjer36-t226",
+        "msjer36-t227",
+        "msjer36-t228",
+        "msjer36-t229",
+        "msjer36-t230",
+        "msjer36-t231",
+        "msjer36-t232",
+        "msjer36-t233",
+        "msjer36-t234",
+        "msjer36-t235",
+        "msjer36-t236",
+        "msjer36-t237",
+        "msjer36-t238",
+        "msjer36-t239",
+        "msjer36-v262",
+        "msjer36-v263",
+        "msjer36-v264",
+        "msjer36-v265",
+        "msjer36-v266",
+        "msjer36-v267",
+        "msjer36-v268",
+        "msjer36-v269",
+        "msjer36-h270",
+        "msjer36-h271",
+        "msjer36-h272",
+        "msjer36-h273",
+        "msjer36-h274"
+      ],
+      "description": "Domain-adaptation stage: full unfrozen fine-tune of Sophro Mhiro on MS Jerusalem 36 Syriac (133 folios, ~17,955 lines, Estrangelo/Eastern). Goal: shift backbone features toward Turfan-era Syriac-script writing before applying Sogdian delta on c2av. ~120 train / 8 val / 5 holdout folios."
+    }
+  },
+  "metadata": {
+    "plate_count": 133,
+    "source": "Zenodo 18157525 — MS Jerusalem SMMJ 36, 12th-14th c. Syriac (Estrangelo/Eastern)",
+    "license": "CC-BY-4.0",
+    "notes": "Stage 1 of v5 lever #2 (domain adaptation). Stage 2 fine-tunes this adapted model on c2av 148 lines with freeze_backbone for 5 Sogdian-specific classes."
+  }
+}

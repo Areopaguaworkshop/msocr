@@ -1,0 +1,20 @@
+{
+  "manifest_id": "c2av-finetune-lopo-c2av01",
+  "style_group_id": "c2av-syriac-finetune",
+  "script_block": "U+0710",
+  "model_path": "models/kraken/lopo/c2av_lopo_c2av01.safetensors",
+  "per_manuscript": {
+    "c2av01": {
+      "cer": 77.9,
+      "wer": 100.0,
+      "accuracy": 22.1
+    }
+  },
+  "per_style_group": {
+    "c2av-syriac-finetune": {
+      "cer": 77.9,
+      "wer": 100.0,
+      "accuracy": 22.1
+    }
+  }
+}
