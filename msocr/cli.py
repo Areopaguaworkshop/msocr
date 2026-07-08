@@ -779,6 +779,44 @@ def evaluate(manifest, style_group, model, reports_dir) -> None:
     click.echo(f"Evaluation report: {report_path}")
 
 
+@main.command(name="dump-preds")
+@click.option("--model", required=True, type=click.Path(path_type=Path),
+              help="Path to the .safetensors or .mlmodel recognition model")
+@click.option("-x", "--xml", "xml_paths", multiple=True,
+              type=click.Path(path_type=Path, exists=True),
+              help="PAGE XML file to predict on (repeatable)")
+@click.option("-p", "--plate-id", "plate_ids", multiple=True,
+              help="Plate id to resolve (e.g. c2av12; repeatable)")
+@click.option("-o", "--output-dir", default="reports/", show_default=True,
+              type=click.Path(path_type=Path),
+              help="Directory to write <plate>_preds.json files")
+def dump_preds_command(model, xml_paths, plate_ids, output_dir) -> None:
+    """Run a Kraken recognition model over unannotated PAGE XMLs, dump predictions.
+
+    Generalizes scripts/dump_c2av12_preds.py: takes a model path plus either
+    explicit --xml files or --plate-id ids (resolved via the c2av gt naming
+    convention), and writes <plate_id>_preds.json with per-line transcript +
+    confidence. Used to bootstrap the correct-don't-transcribe annotation loop.
+    """
+    from msocr.training.dump_preds import dump_predictions
+
+    if not xml_paths and not plate_ids:
+        raise click.ClickException(
+            "dump-preds: provide at least one --xml/-x or --plate-id/-p"
+        )
+    try:
+        dump_predictions(
+            model_path=model,
+            xml_paths=list(xml_paths) or None,
+            plate_ids=list(plate_ids) or None,
+            output_dir=Path(output_dir),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Wrote predictions to {Path(output_dir)}")
+
+
 @main.command(name="annotate")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
 @click.option("--port", default="8001", show_default=True, type=int, help="Bind port")

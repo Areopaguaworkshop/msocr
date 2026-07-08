@@ -19,6 +19,63 @@
 > analysis (§8) and a sized work list (§9). The methodology half (§1-3, §5-7)
 > is unchanged from v8 — lib-2 validated it.
 
+---
+
+## Status (updated 2026-07-07)
+
+### Stage 0.4 decision: **ANNOTATE MORE**
+User confirmed 2026-07-07: target **~50 plates / ~750 lines** (up from the
+current 12 plates / 178 lines). This is the single highest-leverage action in
+the whole plan per `fix-a-v9-fragment-pipeline.md` §0.4. The frontend work
+below is sequenced to make the scholar's annotation time efficient — the
+Couture 2023 caution (protocol consistency beats quantity at small scale)
+applies, so the convention checklist (§3) must be followed per-plate.
+
+### Tier 0 — DONE (committed `bd9d187`)
+All 6 Tier 0 XS items shipped in `frontend/src/AnnotateEditor.tsx` + `frontend/src/types.ts`:
+1. ✅ U+0323 combining underdot in `SOGDIAN_CHARS` palette
+2. ✅ DamageZone promoted out of "Advanced" toggle (default-visible region palette)
+3. ✅ Keyboard shortcuts: M (mask flag), L (reading-order display), T (type assign / transcribe), Ctrl+A (select all lines)
+4. ✅ Image rotation control in OSD viewer (−90° / +90° / reset)
+5. ✅ Per-session `readDirection` field (default `horizontal-rl`)
+6. ✅ Per-line `confidence` field placeholder in `Line` type (color-coded badge; field populated by Tier 2 #17-20 bootstrap loop)
+
+Tier 0 items #3 (RTL `<ReadingOrder>` in PAGE XML), #7 (line `type` field), and #8 (ALTO decision) from §9 below were handled as part of Stage 0.3 backend work (commit `b0fd817`): RTL `<ReadingOrder>` parse+emit done, multi-region nesting fixed, ALTO kept+fixed (caller exists at `annotation_api.py:326`). Tier 0 frontend item #7 (line `type` field UI) is deferred to Tier 1 — backend has the region-type path, but the per-line `type` dropdown is a Tier 1 S item.
+
+### Tier 1 — NEXT (before the scholar's next annotation batch)
+These are the items that make daily annotation efficient. Do these BEFORE the
+scholar starts the ~38-plate batch, otherwise annotation time is wasted
+fighting the UI:
+- **#10** per-point delete on baselines (Ctrl+Del) — XS
+- **#11** invert reading direction (I key) — S
+- **#12** join lines (J key) — S
+- **#13** explicit line-region link/unlink (Y/U keys) + orphan-line indicator — S
+- **#14** automatic reading-order numbering + order badges + L-key toggle (L-key already done in Tier 0, needs the auto-number sort) — S
+- **#15** "?" help pop-up with shortcuts cheatsheet — S
+- **#16** plain-text panel (Ctrl+5) — M
+- **#7** line `type` field dropdown (Correction/Main/Numbering/Signature) — S (deferred from Tier 0)
+
+### Tier 2 — BEFORE the bootstrap loop works end-to-end
+These unblock the correct-don't-transcribe loop (§5). Tier 2 #17-20 is being
+partially built NOW (Stage 2.3 of the fragment pipeline, fix-4): the
+`msocr dump-preds` CLI + `/bootstrap` endpoint are landing. The frontend
+wiring to call `/bootstrap` and the "Transcribe" button are the remaining
+Tier 2 work after fix-4 reconciles.
+- **#17** `/bootstrap` endpoint — IN PROGRESS (fix-4, Stage 2.3)
+- **#18** `confidence` field — DONE in Tier 0 (placeholder populated by #17)
+- **#19** model picker — S (after #17 lands)
+- **#20** "Transcribe" button — S (after #17, #19)
+- **#21** `row_id` fragment grouping — M (fragment convention §4.3)
+- **#22** RTL `<ReadingOrder>` — DONE in Stage 0.3 backend
+- **#23-26** training buttons + status + my models + copy-predict-to-manual — M each (the bootstrap loop mechanics)
+
+### Tier 3 / Tier 4 — DEFER
+Versions, active learning, lasso, scissors, IIIF, PDF, document grouping —
+all deferred until the ~50-plate annotation batch is done and Stage 4
+recognition fine-tune has been measured. Do not build these on speculation.
+
+---
+
 ## 1. The core methodological choice: what kind of transcription is HTR ground truth?
 
 Digital paleography distinguishes three transcription approaches:

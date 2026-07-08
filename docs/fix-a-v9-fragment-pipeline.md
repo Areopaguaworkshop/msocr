@@ -12,6 +12,26 @@
 > Date: 2026-07-07. Author: orchestrator, with @librarian (claims validation)
 > and @explorer (codebase map).
 
+---
+
+## Status (updated 2026-07-07)
+
+| Stage | Status | Owner | Commit / Notes |
+|---|---|---|---|
+| 0.1 v6 blocker | **DEFERRED** | — | RunPod pod `phpyu59p2flw8g` terminated. MS Jer 36 intermediate adaptation deferred; Stage 4 will use raw `sophro_mhiro_syriac.safetensors` base. Re-spin RunPod when ready for Stage 4; fix `ssh_exec` PTY bug first. |
+| 0.2 LOOCV | **BLOCKED on GPU** | — | Needs RunPod + 12 model trains. Deferred until Stage 4. 1/12 folds done (`c2av01`, CER 77.9%). |
+| 0.3 Fragment convention backend | **DONE** | fix-2 | Commit `b0fd817`. RTL `<ReadingOrder>` parse+emit, multi-region nesting, ALTO kept+fixed, orphan-line nearest-region fallback. 8 tests pass. |
+| 0.4 Annotation scale decision | **DONE** | user | "Annotate more" — target ~50 plates / ~750 lines. Gates Stage 3 (≥30 plates) and Stage 4. |
+| 1 Preprocessing wiring | **DONE** | fix-3 | New `msocr/preprocessing/pipeline.py` (116 lines) chains isolate → binarize → deskew → manuscript_area → row_bands. Self-check passes (`uv run python -m msocr.preprocessing.pipeline` → `ok`). No preprocessing/segmentation tests broke. Per-fragment `_mask.png` is pre-deskew (used for Hough); BLLA re-binarizes from deskewed crops at Stage 3. |
+| 2.1-2.2 Within-line / DamageZone policy | **DONE** | fix-1 | Tier 0 frontend: U+0323 in palette, DamageZone default-visible. |
+| 2.3 dump-preds + /bootstrap | **DONE** | fix-4 | New `msocr/training/dump_preds.py` (261 lines, generalizes `scripts/dump_c2av12_preds.py`), `msocr dump-preds` CLI subcommand (+38 lines in `cli.py`), POST `/api/sessions/{id}/bootstrap` endpoint (+137 lines in `annotation_api.py`). Builds kraken `Segmentation` from v2 baselines+boundaries via `BaselineLine`, loads model once, predicts per line, means per-char confidences into scalar. Self-check ok; 35 CLI/service/data tests pass. Frontend wiring (calling `/bootstrap` from `AnnotateEditor`) is Tier 2 #17-20 work. |
+| 3 BLLA seg fine-tune | **BLOCKED on annotation** | — | Needs ≥30 fragment-aware plates. ~50-plate batch unblocks this. |
+| 4 Recognition fine-tune | **BLOCKED on GPU + LOOCV** | — | Needs RunPod + Stage 0.2 LOOCV first. |
+| 5 Inference + post-correction | **DEFERRED** | — | After Stage 4. |
+| 6 Evaluation | **PARTIAL** | — | `confusion_analyze.py` exists; needs LOOCV report to be meaningful. |
+
+---
+
 ## TL;DR — what changed from v7
 
 | # | v7 assumption | v8 correction | Why |

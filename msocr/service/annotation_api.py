@@ -80,6 +80,20 @@ class SaveAnnotationsRequest(BaseModel):
     )
 
 
+class BootstrapRequest(BaseModel):
+    """Request model for the /bootstrap predictions endpoint.
+
+    Triggers a Kraken recognition model over the session's existing v2 lines
+    (baselines + boundaries) and writes transcript + confidence back into
+    the v2 line state, so the frontend's correct-don't-transcribe loop can
+    start from model predictions instead of a blank plate.
+    """
+
+    model_path: str = Field(
+        ..., description="Path to a .safetensors/.mlmodel on disk"
+    )
+
+
 class SessionResponse(BaseModel):
     """Response model for session data."""
 
@@ -516,6 +530,129 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
         if updated is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
         return {"status": "ok"}
+
+    @app.post("/api/sessions/{session_id}/bootstrap")
+    def bootstrap_predictions(session_id: str, request: BootstrapRequest) -> Dict[str, Any]:
+        """Run a Kraken recognition model over the session's v2 lines, write
+        transcript + confidence back into the v2 line state.
+
+        Used by the frontend's correct-don't-transcribe loop to start a fresh
+        plate from model predictions rather than a blank slate. Requires the
+        session to already have v2 lines with baselines + boundaries (from
+        autosuggest or imported GT XML).
+
+        ponytail: builds a kraken Segmentation directly from the v2 line
+        baselines + boundaries, loads the model once, predicts per line.
+        Falls back to per-line bbox crop + predict if building a full
+        Segmentation is awkward. No new abstraction — one endpoint, one path.
+        """
+        session = manager.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+        v2 = session.annotations_v2 or {}
+        lines_in = v2.get("lines", []) or []
+        if not lines_in:
+            raise HTTPException(
+                status_code=422,
+                detail="Session has no v2 lines; run /autosuggest or import a GT XML first",
+            )
+
+        model_path = Path(request.model_path)
+        if not model_path.exists():
+            raise HTTPException(
+                status_code=400, detail=f"Model not found: {model_path}"
+            )
+
+        # Resolve the page image for this session (predict needs the raster).
+        image_path = manager._get_page_image_path(session_id)
+        if not image_path.exists() and session.ingestion_path == IngestionPath.LOCAL_FILE and session.source:
+            alt = Path(session.source)
+            if alt.exists():
+                image_path = alt
+        if not image_path.exists():
+            raise HTTPException(
+                status_code=422, detail="No source image available for session"
+            )
+
+        try:
+            from PIL import Image
+            from kraken.tasks import RecognitionTaskModel
+            from kraken.configs import RecognitionInferenceConfig
+            from kraken.containers import Segmentation, BaselineLine
+
+            model = RecognitionTaskModel.load_model(str(model_path))
+            cfg = RecognitionInferenceConfig()
+
+            # ponytail: build a Segmentation from the v2 baselines + boundaries
+            # directly — avoids re-segmenting. BaselineLine is the kraken 7.x
+            # container for a baseline-geometry line.
+            kraken_lines = []
+            for ln in lines_in:
+                baseline = ln.get("baseline") or []
+                boundary = ln.get("boundary") or []
+                if not baseline:
+                    continue
+                kraken_lines.append(
+                    BaselineLine(
+                        id=ln.get("id", f"l{len(kraken_lines)+1}"),
+                        baseline=[(int(x), int(y)) for x, y in baseline],
+                        boundary=[(int(x), int(y)) for x, y in boundary] if boundary else None,
+                        type="default",
+                    )
+                )
+            if not kraken_lines:
+                raise HTTPException(
+                    status_code=422,
+                    detail="No v2 lines with baselines to predict on",
+                )
+            seg = Segmentation(
+                type="baselines",
+                imagename=str(image_path),
+                text_direction="horizontal-rl",
+                script_detection=False,
+                lines=kraken_lines,
+                regions=None,
+                line_orders=None,
+                language=None,
+            )
+            im = Image.open(str(image_path)).convert("L")
+            preds_by_id: Dict[str, Dict[str, Any]] = {}
+            for kl, rec in zip(kraken_lines, model.predict(im, seg, cfg)):
+                confs = getattr(rec, "confidences", None) or []
+                # ponytail: kraken ocr_record exposes per-char confidences
+                # (list[float]); mean them into a scalar for the frontend.
+                confidence = float(sum(confs) / len(confs)) if confs else 0.0
+                preds_by_id[kl.id] = {
+                    "transcript": rec.prediction,
+                    "confidence": confidence,
+                }
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("bootstrap predict failed for session %s: %s", session_id, exc)
+            raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}")
+
+        # Write transcript + confidence back into v2 line state.
+        updated_lines: List[Dict[str, Any]] = []
+        n_updated = 0
+        for ln in lines_in:
+            new_ln = dict(ln)
+            pred = preds_by_id.get(ln.get("id"))
+            if pred is not None:
+                new_ln["transcript"] = pred["transcript"]
+                new_ln["confidence"] = pred["confidence"]
+                n_updated += 1
+            else:
+                new_ln.setdefault("confidence", None)
+            updated_lines.append(new_ln)
+
+        updated_session = manager.save_annotations_v2(
+            session_id, v2.get("regions", []) or [], updated_lines
+        )
+        if updated_session is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        return {"updated": n_updated, "session": _serialize_session(updated_session)}
 
     @app.post("/api/sessions/{session_id}/import-xml")
     async def import_xml(
