@@ -20,6 +20,13 @@ from typing import Optional
 import runpod
 import paramiko
 
+# ponytail: idle-timeout watchdog, ceiling = SSH_EXEC_IDLE_TIMEOUT; if a
+# command legitimately runs silent >120s (e.g. apt install), bump via the
+# ssh_exec idle_timeout param. Fires only when the channel goes silent AND
+# exit_status_ready() stays False — the documented sshd-holds-channel-open
+# zombie state that wedges the poll loop until the 2h deadline.
+SSH_EXEC_IDLE_TIMEOUT = 120
+
 
 class PodNeverScheduledError(RuntimeError):
     """Pod was created but the scheduler never placed it on a machine.
@@ -102,8 +109,16 @@ class RunPodRunner:
         raise RuntimeError(f"pod {pod_id} never exposed a public SSH port")
 
     def ssh_exec(self, pod_hostport: tuple[str, int], cmd: list[str],
-                 timeout: int = 7200) -> str:
-        """SSH into the pod and exec a command. Returns stdout. Raises on non-zero exit."""
+                 timeout: int = 7200,
+                 idle_timeout: int = SSH_EXEC_IDLE_TIMEOUT) -> str:
+        """SSH into the pod and exec a command. Returns stdout. Raises on non-zero exit.
+
+        ``idle_timeout`` is the watchdog ceiling: if no chunk arrives on either
+        channel for ``idle_timeout`` seconds AND ``exit_status_ready()`` stays
+        False, the channel is treated as a sshd-holds-channel-open zombie and
+        force-closed (see SSH_EXEC_IDLE_TIMEOUT). Bump it for known-silent long
+        commands (e.g. apt install).
+        """
         host, port = pod_hostport
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -129,6 +144,7 @@ class RunPodRunner:
         out_chan.settimeout(30)  # per-read timeout; overall deadline enforced below
         err_chan.settimeout(30)
         deadline = time.monotonic() + timeout
+        last_recv_time = time.monotonic()  # ponytail: idle-watchdog anchor
         out_buf: list[str] = []
         err_buf: list[str] = []
         while True:
@@ -141,6 +157,7 @@ class RunPodRunner:
                         sys.stdout.write(chunk)
                         sys.stdout.flush()
                         buf.append(chunk)
+                        last_recv_time = time.monotonic()  # any output → alive
 
             if out_chan.exit_status_ready():
                 # Final drain after exit (catches trailing output emitted
@@ -157,6 +174,21 @@ class RunPodRunner:
             if time.monotonic() >= deadline:
                 raise RuntimeError(
                     f"pod command timed out after {timeout}s (no exit status): "
+                    f"{cmd_str[:200]}"
+                )
+            # ponytail: idle-timeout watchdog. sshd can keep the session channel
+            # open after the child exits (no-PTY path); exit_status_ready() then
+            # stays False forever and recv_ready() is False (no buffered output),
+            # so the deadline loop sleeps 0.2s for hours. Force-close + raise so
+            # the caller can retry instead of billing a zombie pod.
+            if time.monotonic() - last_recv_time > idle_timeout:
+                try:
+                    out_chan.close()
+                finally:
+                    client.close()
+                raise RuntimeError(
+                    f"ssh_exec idle timeout — channel zombie "
+                    f"(no output for {idle_timeout}s, no exit status): "
                     f"{cmd_str[:200]}"
                 )
             time.sleep(0.2)

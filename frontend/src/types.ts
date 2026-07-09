@@ -29,6 +29,10 @@ export interface Line {
   // recognized). Tier 2 task will wire real values from /autosuggest; UI must
   // not break if this field appears. (fix-a-v9-annotation-plan.md §9 #6.)
   confidence?: number | null;
+  // ponytail: explicit line→region link (§9 #13). Additive optional field.
+  // null/missing or stale ref = orphan line (rendered with yellow dashed
+  // outline + ⚠ badge). Existing session JSON without this field still loads.
+  regionId?: string | null;
 }
 
 export interface AnnotationState {

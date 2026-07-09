@@ -42,18 +42,25 @@ All 6 Tier 0 XS items shipped in `frontend/src/AnnotateEditor.tsx` + `frontend/s
 
 Tier 0 items #3 (RTL `<ReadingOrder>` in PAGE XML), #7 (line `type` field), and #8 (ALTO decision) from §9 below were handled as part of Stage 0.3 backend work (commit `b0fd817`): RTL `<ReadingOrder>` parse+emit done, multi-region nesting fixed, ALTO kept+fixed (caller exists at `annotation_api.py:326`). Tier 0 frontend item #7 (line `type` field UI) is deferred to Tier 1 — backend has the region-type path, but the per-line `type` dropdown is a Tier 1 S item.
 
-### Tier 1 — NEXT (before the scholar's next annotation batch)
-These are the items that make daily annotation efficient. Do these BEFORE the
-scholar starts the ~38-plate batch, otherwise annotation time is wasted
-fighting the UI:
-- **#10** per-point delete on baselines (Ctrl+Del) — XS
-- **#11** invert reading direction (I key) — S
-- **#12** join lines (J key) — S
-- **#13** explicit line-region link/unlink (Y/U keys) + orphan-line indicator — S
-- **#14** automatic reading-order numbering + order badges + L-key toggle (L-key already done in Tier 0, needs the auto-number sort) — S
-- **#15** "?" help pop-up with shortcuts cheatsheet — S
-- **#16** plain-text panel (Ctrl+5) — M
-- **#7** line `type` field dropdown (Correction/Main/Numbering/Signature) — S (deferred from Tier 0)
+### Tier 1 — DONE (uncommitted, working tree 2026-07-09)
+All 8 items shipped in `frontend/src/AnnotateEditor.tsx` (+368/−15) +
+`frontend/src/types.ts` (+4, additive `regionId?: string | null`). `tsc
+--noEmit` + `vite build` pass. Tier 0 shortcuts preserved; new bindings
+added after the existing keydown block:
+- **#10** per-point delete on baselines (Ctrl+Del) — DONE
+- **#11** invert reading direction (I key) — DONE
+- **#12** join lines (J key) — DONE (reuses Tier-0 `selectedLineIds` Set)
+- **#13** explicit line-region link/unlink (Y/U keys) + orphan indicator — DONE (`regionId` additive; yellow dashed outline + ⚠ badge)
+- **#14** automatic reading-order numbering + order badges + auto-sort (Shift+L) — DONE (order index = `lines.indexOf`, computed not stored; `Shift+L` keystroke not a menu, `ponytail:` YAGNI for single-column folios)
+- **#15** "?" help pop-up with shortcuts cheatsheet — DONE (~80 lines JSX)
+- **#16** plain-text panel (Ctrl+5) — DONE (togglable side column, one textarea per line, autosave on blur, hover-highlight cross-panel)
+- **#7** line `type` field dropdown — DONE. **Deviation from plan:** plan §9 lists "Correction/Main/Numbering/Signature" (eScriptorium functional types) but the existing `LineType` enum (`DefaultLine`/`HeadingLine`/`InterlinearLine`, SegmOnto structural types) is what the backend PAGE XML emitter already knows — used as-is. `ponytail:` comment in code.
+
+Ponytail simplifications + ceilings (in code as `// ponytail:` comments):
+per-line vertex edit only (no insert-vertex), `Shift+L` keystroke vs menu,
+side column vs overlay panel, existing LineType enum vs plan's functional
+types, one-`<textarea>`-per-line re-render (virtualize if >~50 lines
+stutter), join two-at-a-time (no seam smoothing).
 
 ### Tier 2 — BEFORE the bootstrap loop works end-to-end
 These unblock the correct-don't-transcribe loop (§5). Tier 2 #17-20 is being

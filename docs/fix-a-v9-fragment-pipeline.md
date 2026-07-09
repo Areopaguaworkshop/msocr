@@ -18,7 +18,7 @@
 
 | Stage | Status | Owner | Commit / Notes |
 |---|---|---|---|
-| 0.1 v6 blocker | **DEFERRED** | — | RunPod pod `phpyu59p2flw8g` terminated. MS Jer 36 intermediate adaptation deferred; Stage 4 will use raw `sophro_mhiro_syriac.safetensors` base. Re-spin RunPod when ready for Stage 4; fix `ssh_exec` PTY bug first. |
+| 0.1 v6 blocker | **DEFERRED (watchdog fixed)** | — | RunPod pod `phpyu59p2flw8g` terminated. MS Jer 36 intermediate adaptation deferred; Stage 4 will use raw `sophro_mhiro_syriac.safetensors` base. Re-spin RunPod when ready for Stage 4. `ssh_exec` PTY/headless-block bug **fixed** (uncommitted working tree 2026-07-09): `SSH_EXEC_IDLE_TIMEOUT=120` module constant + idle-timeout watchdog in `runpod_runner.py` — force-closes channel+client when `last_recv_time` silent >`idle_timeout` AND `exit_status_ready()` is False, raises `RuntimeError`. Test `test_ssh_exec_raises_on_idle_timeout` added. The PTY bug that hung `ketos train` on RunPod is now bounded to 120 s instead of hanging forever. |
 | 0.2 LOOCV | **BLOCKED on GPU** | — | Needs RunPod + 12 model trains. Deferred until Stage 4. 1/12 folds done (`c2av01`, CER 77.9%). |
 | 0.3 Fragment convention backend | **DONE** | fix-2 | Commit `b0fd817`. RTL `<ReadingOrder>` parse+emit, multi-region nesting, ALTO kept+fixed, orphan-line nearest-region fallback. 8 tests pass. |
 | 0.4 Annotation scale decision | **DONE** | user | "Annotate more" — target ~50 plates / ~750 lines. Gates Stage 3 (≥30 plates) and Stage 4. |

@@ -148,6 +148,18 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   // this is a multi-select overlay: membership here highlights the row; clicking
   // any line clears it. No batch ops wired yet — minimal per the plan.
   const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set());
+  // ponytail: #10 per-point delete on baselines. Tracks the baseline vertex
+  // being dragged (so Ctrl+Del knows which point to drop). Ceiling: only one
+  // line's vertices are editable at a time (the selected line); no multi-line
+  // vertex editing — upgrade to a per-line vertex layer if batch edits needed.
+  const [activeVertexIndex, setActiveVertexIndex] = useState<number | null>(null);
+  const [dragLineVertex, setDragLineVertex] = useState<{ lineId: string; index: number } | null>(null);
+  // ponytail: #13 link/unlink cycle cursor — index into regions list for the
+  // Y-key "cycle" when >1 region exists. Client-side only; reset on line change.
+  const [linkCycle, setLinkCycle] = useState(0);
+  // ponytail: #16 plain-text panel (Ctrl+5). Toggled side column showing all
+  // transcripts as one editable block in reading order. Autosave on blur.
+  const [showTextPanel, setShowTextPanel] = useState(false);
 
   const imageUrl = `/api/sessions/${sessionId}/image`;
 
@@ -209,6 +221,11 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               // ponytail: preserve confidence if the server/proxy sends it (§9 #6).
               confidence: typeof (l as { confidence?: number | null }).confidence === "number"
                 ? (l as { confidence?: number | null }).confidence
+                : null,
+              // ponytail: preserve explicit line→region link (§9 #13). Stale
+              // refs (region since deleted) render as orphan; no cleanup here.
+              regionId: typeof (l as { regionId?: string | null }).regionId === "string"
+                ? (l as { regionId?: string | null }).regionId
                 : null,
             }))
             .filter((l) => l.baseline.length >= 2),
@@ -310,6 +327,45 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     setDragVertex(null);
     markDirty();
   }, [dragVertex, markDirty]);
+
+  // ponytail: #10 per-point delete + drag on baseline vertices. Mirror of the
+  // region vertex drag, but on the selected line's baseline points. Reuses the
+  // same pointer-capture pattern. Ceiling: only the selected line's vertices
+  // are draggable; no insert-vertex (double-click to add) — YAGNI for small
+  // fixes, upgrade to a polyline editor if curved baselines become common.
+  const onLineVertexPointerDown = useCallback(
+    (e: React.PointerEvent, lineId: string, index: number) => {
+      e.stopPropagation();
+      e.preventDefault();
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      setDragLineVertex({ lineId, index });
+      setActiveVertexIndex(index);
+    },
+    [],
+  );
+  const onLineVertexPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragLineVertex) return;
+      e.preventDefault();
+      const point = screenToImage(e as unknown as React.MouseEvent);
+      if (!point) return;
+      setLines((items) =>
+        items.map((l) => {
+          if (l.id !== dragLineVertex.lineId) return l;
+          const baseline = l.baseline.slice();
+          baseline[dragLineVertex.index] = point;
+          return { ...l, baseline };
+        }),
+      );
+    },
+    [dragLineVertex, screenToImage],
+  );
+  const onLineVertexPointerUp = useCallback((e: React.PointerEvent) => {
+    if (!dragLineVertex) return;
+    (e.target as Element).releasePointerCapture?.(e.pointerId);
+    setDragLineVertex(null);
+    markDirty();
+  }, [dragLineVertex, markDirty]);
 
   // 2-click baseline (eScriptorium pattern)
   const handleOverlayClick = useCallback(
@@ -423,6 +479,10 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             confidence: typeof (l as { confidence?: number | null }).confidence === "number"
               ? (l as { confidence?: number | null }).confidence
               : null,
+            // ponytail: preserve line→region link on XML import (§9 #13).
+            regionId: typeof (l as { regionId?: string | null }).regionId === "string"
+              ? (l as { regionId?: string | null }).regionId
+              : null,
           }))
           .filter((l) => l.baseline.length >= 2),
       );
@@ -486,6 +546,15 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       if (intersect) inside = !inside;
     }
     return inside;
+  }
+
+  // ponytail: #13 orphan = line with null/missing regionId, or a regionId that
+  // no longer matches any region (stale ref after region deletion). Used for the
+  // yellow dashed outline + ⚠ badge. Ceiling: O(lines×regions) per render —
+  // fine for a single folio (~50 lines); upgrade to a Set lookup if it bites.
+  function isOrphanLine(line: Line): boolean {
+    if (!line.regionId) return true;
+    return !regions.some((r) => r.id === line.regionId);
   }
 
   function baselineMidpoint(line: Line): Point {
@@ -580,6 +649,113 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     setSelectedLineIds(new Set(lines.map((l) => l.id)));
   }
 
+  // ponytail: #10 Ctrl+Del — drop the active baseline vertex (the one last
+  // dragged or hovered). Keeps the line if ≥2 points remain; below 2, the line
+  // is invalid for Kraken so delete it outright (mirrors the load filter).
+  function deleteActiveVertex() {
+    if (activeVertexIndex == null || !selectedLine) return;
+    const idx = activeVertexIndex;
+    setLines((items) =>
+      items
+        .map((l) => {
+          if (l.id !== selectedLine.id) return l;
+          const baseline = l.baseline.slice(0, idx).concat(l.baseline.slice(idx + 1));
+          return { ...l, baseline };
+        })
+        .filter((l) => l.baseline.length >= 2),
+    );
+    setActiveVertexIndex(null);
+    markDirty();
+  }
+
+  // ponytail: #11 I-key invert — reverse baseline + boundary arrays of the
+  // selected line. Marks dirty. Ceiling: only reverses point order; does not
+  // recompute mask (Kraken recomputes on next segment) — fine for training.
+  function invertSelectedLine() {
+    if (!selectedLine) return;
+    setLines((items) =>
+      items.map((l) =>
+        l.id === selectedLine.id
+          ? { ...l, baseline: l.baseline.slice().reverse(), boundary: l.boundary.slice().reverse() }
+          : l,
+      ),
+    );
+    markDirty();
+  }
+
+  // ponytail: #12 J-key join — concat first two selected lines' baselines
+  // (dedup shared endpoint), join transcripts with a space, drop the second.
+  // Uses selectedLineIds if ≥2; else the selected line + the next line.
+  // Ceiling: only joins two at a time; no polyline smoothing at the seam.
+  function joinSelectedLines() {
+    const ids =
+      selectedLineIds.size >= 2
+        ? Array.from(selectedLineIds).slice(0, 2)
+        : selectedLine
+          ? [selectedLine.id, lines[lines.findIndex((l) => l.id === selectedLine.id) + 1]?.id].filter(
+              Boolean,
+            ) as string[]
+          : [];
+    if (ids.length < 2) return;
+    const a = lines.find((l) => l.id === ids[0]);
+    const b = lines.find((l) => l.id === ids[1]);
+    if (!a || !b) return;
+    // dedup shared endpoint: if a's last point == b's first point, drop b's first.
+    const aEnd = a.baseline[a.baseline.length - 1];
+    const bStart = b.baseline[0];
+    const sameEndpoint = aEnd && bStart && aEnd[0] === bStart[0] && aEnd[1] === bStart[1];
+    const baseline = sameEndpoint
+      ? a.baseline.concat(b.baseline.slice(1))
+      : a.baseline.concat(b.baseline);
+    const boundary = a.boundary.concat(b.boundary);
+    const transcript = [a.transcript, b.transcript].filter((s) => s).join(" ");
+    setLines((items) => {
+      const next = items
+        .map((l) => (l.id === a.id ? { ...l, baseline, boundary, transcript } : l))
+        .filter((l) => l.id !== b.id);
+      return next;
+    });
+    setSelectedLineIds(new Set());
+    setSelected({ kind: "line", id: a.id });
+    markDirty();
+  }
+
+  // ponytail: #13 Y-key link — assign selected line to a region. With one
+  // region, link directly; with >1, cycle by linkCycle (reset on each line
+  // change). Stale refs render as orphan; no server-side constraint.
+  function linkSelectedLineToRegion() {
+    if (!selectedLine || regions.length === 0) return;
+    const target = regions.length === 1 ? regions[0] : regions[linkCycle % regions.length];
+    setLinkCycle((c) => (regions.length > 1 ? c + 1 : c));
+    setLines((items) => items.map((l) => (l.id === selectedLine.id ? { ...l, regionId: target.id } : l)));
+    markDirty();
+  }
+
+  // ponytail: #13 U-key unlink — clear the selected line's regionId (→ orphan).
+  function unlinkSelectedLine() {
+    if (!selectedLine) return;
+    setLines((items) => items.map((l) => (l.id === selectedLine.id ? { ...l, regionId: null } : l)));
+    markDirty();
+  }
+
+  // ponytail: #14 Shift+L auto-sort — reorder lines by baseline centroid Y,
+  // top-to-bottom. Reading order is computed (array index), never stored.
+  // ponytail: not a menu item — one keystroke is the whole UX; a sort dialog
+  // with column selection is YAGNI for a single-column Sogdian folio. Upgrade
+  // path: add a column-picker if multi-column layouts appear.
+  function autoSortByReadingOrder() {
+    setLines((items) => {
+      const withY = items.map((l) => {
+        const ys = l.baseline.map((p) => p[1]);
+        const cy = ys.length ? ys.reduce((s, y) => s + y, 0) / ys.length : 0;
+        return { l, cy };
+      });
+      withY.sort((a, b) => a.cy - b.cy);
+      return withY.map((x) => x.l);
+    });
+    markDirty();
+  }
+
   // ponytail: M (mask toggle) — placeholder flag, no mask overlay rendered yet
   // (§9 #4). YAGNI until a real mask layer is needed; the binding is reserved.
   // ponytail: L (reading-order display toggle) — showOrder paints the index on
@@ -630,6 +806,33 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       if (e.ctrlKey && e.key.toLowerCase() === "a") { e.preventDefault(); selectAllLines(); }
       if (e.key === "ArrowDown" && selectedLineIndex >= 0) { e.preventDefault(); gotoLine(1); }
       if (e.key === "ArrowUp" && selectedLineIndex >= 0) { e.preventDefault(); gotoLine(-1); }
+      // ponytail: Tier 1 shortcuts (§9 #10-16, #7). All additive — Tier 0
+      // bindings above (v/r/b/t/m/l/Esc/Del/Backspace/Ctrl+S/Ctrl+A/arrows)
+      // are untouched. Ctrl-prefixed additions land after the existing ones.
+      // #10 per-point delete (Ctrl+Del) — only when a baseline vertex is active.
+      if (e.ctrlKey && (e.key === "Delete" || e.key === "Backspace")) {
+        e.preventDefault();
+        deleteActiveVertex();
+        return;
+      }
+      // #11 I — invert reading direction of selected line.
+      if (e.key === "i" || e.key === "I") { invertSelectedLine(); }
+      // #12 J — join first two selected lines (or selected + next).
+      if (e.key === "j" || e.key === "J") { joinSelectedLines(); }
+      // #13 Y link / U unlink selected line ↔ region.
+      if (e.key === "y" || e.key === "Y") { linkSelectedLineToRegion(); }
+      if (e.key === "u" || e.key === "U") { unlinkSelectedLine(); }
+      // #14 Shift+L — auto-sort lines top-to-bottom by baseline centroid Y.
+      // Plain L (reading-order display toggle) is the Tier 0 binding above.
+      if (e.shiftKey && (e.key === "L" || e.key === "l")) {
+        e.preventDefault();
+        autoSortByReadingOrder();
+      }
+      // #15 ? — toggle help cheatsheet. Also Esc inside the modal closes it
+      // (Esc's existing Tier 0 binding cancels drawing; both run, harmless).
+      if (e.key === "?") { setShowHelp((v) => !v); }
+      // #16 Ctrl+5 — toggle plain-text panel (all transcripts, reading order).
+      if (e.ctrlKey && e.key === "5") { e.preventDefault(); setShowTextPanel((v) => !v); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -703,16 +906,33 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       );
     }
     return (
-      <polyline
-        key={`l:${item.id}`}
-        {...common}
-        points={renderPoints(points)}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={isSel ? lineWidth + 2 : lineWidth}
-      />
+      <>
+        <polyline
+          key={`l:${item.id}`}
+          {...common}
+          points={renderPoints(points)}
+          fill="none"
+          stroke={color}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={isSel ? lineWidth + 2 : lineWidth}
+        />
+        {/* ponytail: #13 orphan indicator — yellow dashed outline over the
+            baseline when the line has no live region link. A boundary outline
+            would be better but most lines have empty boundary (Kraken fills it
+            later), so we mark the baseline. Ceiling: visual only, no hit area. */}
+        {kind === "line" && isOrphanLine(item as Line) && (
+          <polyline
+            key={`l:orph:${item.id}`}
+            points={renderPoints(points)}
+            fill="none"
+            stroke="#eab308"
+            strokeDasharray="5 3"
+            strokeWidth={isSel ? lineWidth + 1 : lineWidth}
+            style={{ pointerEvents: "none", opacity: 0.9 }}
+          />
+        )}
+      </>
     );
   }
 
@@ -790,7 +1010,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         </a>
       </header>
 
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[56px_1fr_380px] overflow-hidden">
+      <div className={`flex-1 grid grid-cols-1 overflow-hidden ${showTextPanel ? "lg:grid-cols-[56px_1fr_320px_360px]" : "lg:grid-cols-[56px_1fr_380px]"}`}>
         {/* toolbar rail */}
         <aside className="hidden lg:flex flex-col items-center py-3 gap-1 border-r border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950">
           {visibleModes.map((m) => (
@@ -909,6 +1129,36 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                     onPointerMove={onVertexPointerMove}
                     onPointerUp={onVertexPointerUp}
                     onPointerCancel={onVertexPointerUp}
+                  />
+                );
+              });
+            })()}
+            {/* ponytail: #10 baseline vertex handles for the selected line — drag
+                to nudge, Ctrl+Del on the last-touched vertex to delete it.
+                Shown in Baseline and Transcribe modes so the user can fix points
+                while transcribing. Ceiling: only the selected line; no insert. */}
+            {selectedLine && (mode === "baseline" || mode === "transcribe") && (() => {
+              const l = selectedLine;
+              return l.baseline.map((p, i) => {
+                const sp = imageToScreen(p);
+                if (!sp) return null;
+                const isActive = activeVertexIndex === i;
+                return (
+                  <circle
+                    key={`lv:${l.id}:${i}`}
+                    data-shape="true"
+                    className="vertex-handle"
+                    cx={sp[0]}
+                    cy={sp[1]}
+                    r={isActive ? 7 : 5}
+                    fill={isActive ? ACCENT : "#fff"}
+                    stroke={LINE_COLORS[l.type]}
+                    strokeWidth={2}
+                    style={{ cursor: dragLineVertex?.index === i ? "grabbing" : "grab" }}
+                    onPointerDown={(e) => onLineVertexPointerDown(e, l.id, i)}
+                    onPointerMove={onLineVertexPointerMove}
+                    onPointerUp={onLineVertexPointerUp}
+                    onPointerCancel={onLineVertexPointerUp}
                   />
                 );
               });
@@ -1095,13 +1345,52 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-stone-400 w-5 shrink-0">{i + 1}</span>
-                    <span
-                      className="hintable text-[10px] px-1 rounded shrink-0"
+                    {/* ponytail: #7 line type dropdown (§9 #7). Plan §9 lists
+                        "Correction/Main/Numbering/Signature" but the existing
+                        LineType enum is DefaultLine/HeadingLine/InterlinearLine
+                        — the backend (PAGE XML emitter) already knows these
+                        three, so we use them as-is rather than minting new
+                        values the backend can't emit. Upgrade path: extend the
+                        enum + backend together if the scholar needs more. */}
+                    <select
+                      value={line.type}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        const t = e.target.value as LineType;
+                        setLines((items) => items.map((l) => (l.id === line.id ? { ...l, type: t } : l)));
+                        markDirty();
+                      }}
+                      className="hintable text-[10px] rounded shrink-0 border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 px-1 py-0.5"
                       style={{ color: LINE_COLORS[line.type] }}
                       data-hint={LINE_HINTS[line.type]}
+                      title={`Line type (§9 #7): ${LINE_HINTS[line.type]}`}
                     >
-                      {line.type.replace(/Line$/, "")}
-                    </span>
+                      {LINE_TYPES.map((t) => (
+                        <option key={t} value={t}>{t.replace(/Line$/, "")}</option>
+                      ))}
+                    </select>
+                    {/* ponytail: #13 orphan ⚠ badge — line has no live region link. */}
+                    {isOrphanLine(line) && (
+                      <span
+                        className="text-[10px] shrink-0"
+                        title="Orphan line — not linked to any region (Y to link, U to unlink)"
+                        style={{ color: "#eab308" }}
+                      >
+                        ⚠
+                      </span>
+                    )}
+                    {/* ponytail: #13 region-link indicator — show the linked
+                        region id (truncated) when present and live. */}
+                    {line.regionId && regions.some((r) => r.id === line.regionId) && (
+                      <span
+                        className="text-[9px] font-mono px-1 rounded shrink-0"
+                        title={`Linked to region ${line.regionId}`}
+                        style={{ color: REGION_COLORS[regions.find((r) => r.id === line.regionId)!.type] }}
+                      >
+                        ◆
+                      </span>
+                    )}
                     {/* ponytail: per-line confidence placeholder (§9 #6). Shown
                         only when a numeric confidence is present — Tier 2 wires
                         real values. Color-coded: ≥0.9 green, ≥0.7 amber, else red. */}
@@ -1128,6 +1417,58 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             </ol>
           </div>
         </aside>
+
+        {/* ponytail: #16 plain-text panel (Ctrl+5). Toggled side column: all
+            line transcripts as one editable block in reading order. Edit a row
+            → update that line's transcript; autosave on blur (the global 2s
+            debounce handles it). Hover a row → fit that line in the OSD viewer.
+            ponytail: rendered as a togglable side column (not an overlay) so it
+            doesn't cover the image — simplest layout that keeps both visible.
+            Ceiling: one <textarea> per line re-renders all rows on each keystroke;
+            fine for ~50 lines/folio, upgrade to a virtualized list if it stutters. */}
+        {showTextPanel && (
+          <aside className="hidden lg:flex flex-col border-l border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950 overflow-hidden">
+            <div className="p-3 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase text-stone-500">Plain text</span>
+              <span className="text-[10px] text-stone-400">(Ctrl+5 to close)</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {lines.map((line, i) => (
+                <div
+                  key={line.id}
+                  className="flex gap-1 items-start"
+                  onMouseEnter={() => {
+                    const b = lineBounds(line);
+                    if (b && viewerRef.current) {
+                      const viewer = viewerRef.current;
+                      const tiled = viewer.world.getItemAt(0);
+                      const rect = new OpenSeadragon.Rect(b.x, b.y, b.w, b.h);
+                      const vp = tiled.imageToViewportRectangle(rect);
+                      viewer.viewport.fitBoundsWithConstraints(vp, false);
+                    }
+                  }}
+                >
+                  <span className="text-[10px] font-mono text-stone-400 w-5 shrink-0 pt-1.5">{i + 1}</span>
+                  <textarea
+                    value={line.transcript}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setLines((items) => items.map((l) => (l.id === line.id ? { ...l, transcript: v } : l)));
+                      markDirty();
+                    }}
+                    onBlur={() => save()}
+                    className="flex-1 text-xs leading-relaxed bg-white dark:bg-stone-900 outline-none resize-none border border-stone-200 dark:border-stone-800 rounded p-1.5 min-h-[2rem] font-mono"
+                    rows={1}
+                    placeholder={`line ${i + 1}`}
+                  />
+                </div>
+              ))}
+              {lines.length === 0 && (
+                <p className="text-xs text-stone-400 italic p-2">No lines yet.</p>
+              )}
+            </div>
+          </aside>
+        )}
       </div>
 
       {showHelp && (
@@ -1203,6 +1544,14 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               <li><kbd>Esc</kbd> — cancel current drawing</li>
               <li><kbd>Del</kbd> / <kbd>Backspace</kbd> — delete selected (mode-scoped: Region mode → region, Baseline mode → baseline)</li>
               <li><kbd>Ctrl</kbd>+<kbd>S</kbd> — save now</li>
+              <li><kbd>Ctrl</kbd>+<kbd>Del</kbd> — delete the active baseline vertex (drag a vertex first to mark it active; line kept if ≥2 points remain)</li>
+              <li><kbd>I</kbd> — invert reading direction of the selected line (reverses baseline + boundary point order)</li>
+              <li><kbd>J</kbd> — join the first two selected lines (concat baselines, dedup shared endpoint, join transcripts with a space, drop the second)</li>
+              <li><kbd>Y</kbd> — link the selected line to a region (cycles through regions if more than one)</li>
+              <li><kbd>U</kbd> — unlink the selected line from its region (→ orphan, yellow dashed outline + ⚠ badge)</li>
+              <li><kbd>Shift</kbd>+<kbd>L</kbd> — auto-sort lines top-to-bottom by baseline centroid Y (reading order is the array index, never stored)</li>
+              <li><kbd>?</kbd> — toggle this cheatsheet</li>
+              <li><kbd>Ctrl</kbd>+<kbd>5</kbd> — toggle the plain-text panel (all transcripts in reading order; hover a row to fit that line in the viewer)</li>
             </ul>
 
             <h3 className="font-semibold mt-4 mb-2">Reordering lines</h3>

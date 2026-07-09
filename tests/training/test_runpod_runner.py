@@ -83,7 +83,14 @@ def test_ssh_exec_connects_with_host_and_port(monkeypatch):
     fake_paramiko = MagicMock()
     fake_stdout = MagicMock()
     fake_stdout.channel.recv_exit_status.return_value = 0
+    # ponytail: drain one empty chunk then signal exit so the poll loop
+    # terminates under the MagicMock paramiko (recv_ready() True once →
+    # recv() returns b"" → no stdout write; exit_status_ready() True → break).
+    fake_stdout.channel.recv_ready.side_effect = [True, False, False]
+    fake_stdout.channel.recv.return_value = b""
+    fake_stdout.channel.exit_status_ready.return_value = True
     fake_stderr = MagicMock()
+    fake_stderr.channel.recv_ready.return_value = False
     fake_stderr.read.return_value = b""
     fake_paramiko.SSHClient.return_value.exec_command.return_value = (
         MagicMock(), fake_stdout, fake_stderr
@@ -100,6 +107,33 @@ def test_ssh_exec_connects_with_host_and_port(monkeypatch):
     assert args[0] == "1.2.3.4"
     assert kwargs["port"] == 17445
     fake_client.exec_command.assert_called_once()
+
+
+def test_ssh_exec_raises_on_idle_timeout(monkeypatch):
+    """Watchdog fires when the channel goes silent and exit_status never arrives.
+
+    Reproduces the sshd-holds-channel-open zombie: recv_ready()=False and
+    exit_status_ready()=False forever. With idle_timeout=1 the watchdog must
+    raise RuntimeError("idle timeout ...") within ~1s of wall-clock.
+    """
+    fake_paramiko = MagicMock()
+    fake_stdout = MagicMock()
+    fake_stdout.channel.recv_ready.return_value = False
+    fake_stdout.channel.exit_status_ready.return_value = False
+    fake_stderr = MagicMock()
+    fake_stderr.channel.recv_ready.return_value = False
+    fake_paramiko.SSHClient.return_value.exec_command.return_value = (
+        MagicMock(), fake_stdout, fake_stderr
+    )
+    monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
+    monkeypatch.setattr("time.sleep", lambda *a: None)  # don't actually wait 0.2s
+
+    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
+                          ssh_key_path="/tmp/id_ed25519")
+    with pytest.raises(RuntimeError, match="idle timeout"):
+        runner.ssh_exec(("1.2.3.4", 17445), ["pip", "install", "kraken"],
+                        idle_timeout=1)
+    fake_paramiko.SSHClient.return_value.close.assert_called_once()
 
 
 def test_download_artifact_does_not_terminate_pod_on_failure(monkeypatch):
