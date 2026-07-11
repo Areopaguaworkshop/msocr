@@ -117,6 +117,7 @@ def dump_predictions(
     output_dir: Path | None = None,
     *,
     return_records: bool = False,
+    flag_damage: bool = False,
 ) -> list[dict] | None:
     """Run a Kraken recognition model over one or more PAGE XMLs.
 
@@ -131,6 +132,14 @@ def dump_predictions(
     - ``output_dir`` given: write ``<plate_id>_preds.json`` per plate.
     - otherwise: write to ``reports/`` (matching the one-off's default).
 
+    If ``flag_damage=True``, each record is enriched with ``likely_damage``
+    (bool) and ``damage_reason`` (str | None) via
+    ``msocr.training.damage_flag.flag_predictions`` — a cheap heuristic
+    flagging lines the recognizer likely failed to read due to damage or
+    lacunae (low confidence, empty transcript, single grapheme, or the
+    lacuna token ░). See ``docs/DAMAGE_ANNOTATION_TASK.md`` and
+    ``msocr/training/damage_flag.py``.
+
     Args:
         model_path: Path to a ``.safetensors`` or ``.mlmodel`` on disk.
         xml_paths: Explicit PAGE XML files to predict on.
@@ -138,6 +147,8 @@ def dump_predictions(
             naming convention.
         output_dir: Where to write ``<plate>_preds.json`` files.
         return_records: If True, return records instead of writing files.
+        flag_damage: If True, add ``likely_damage`` + ``damage_reason`` to
+            each record (Phase 0.5 damage-triage signal).
 
     Returns:
         ``list[dict]`` if ``return_records`` else ``None``.
@@ -169,6 +180,13 @@ def dump_predictions(
         for plate_id, xml_path in all_xmls:
             records = _predict_one_xml(model, cfg, xml_path, tmp_path)
             per_plate.append({"plate_id": plate_id, "records": records})
+
+    if flag_damage:
+        # ponytail: heuristic flag, no pixel annotation needed. See
+        # msocr/training/damage_flag.py. Mutates per_plate[i]['records'] in
+        # place, adding likely_damage + damage_reason per record.
+        from msocr.training.damage_flag import flag_predictions
+        flag_predictions(per_plate)
 
     if return_records:
         return per_plate
@@ -253,9 +271,16 @@ if __name__ == "__main__":
             print("ok")
             sys.exit(0)
         out = dump_predictions(
-            model_path=model, xml_paths=[xml], return_records=True
+            model_path=model, xml_paths=[xml], return_records=True, flag_damage=True
         )
         assert out and len(out) == 1, f"expected 1 plate, got {out}"
         recs = out[0]["records"]
         assert len(recs) == 2, f"expected 2 records, got {len(recs)}"
+        # ponytail: synthetic transcripts "line1"/"line2" are 5 and 5 chars
+        # — NOT single-grapheme, so flag_damage should NOT mark them (they
+        # have confidence though, so the flag runs but returns False unless
+        # confidence is < 0.3). Assert the flag fields exist on each record.
+        for r in recs:
+            assert "likely_damage" in r, f"flag_damage missing on {r}"
+            assert "damage_reason" in r, f"damage_reason missing on {r}"
         print("ok")

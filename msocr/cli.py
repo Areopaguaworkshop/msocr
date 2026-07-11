@@ -790,7 +790,10 @@ def evaluate(manifest, style_group, model, reports_dir) -> None:
 @click.option("-o", "--output-dir", default="reports/", show_default=True,
               type=click.Path(path_type=Path),
               help="Directory to write <plate>_preds.json files")
-def dump_preds_command(model, xml_paths, plate_ids, output_dir) -> None:
+@click.option("--flag-damage", is_flag=True, default=False,
+              help="Add likely_damage + damage_reason to each record "
+                   "(Phase 0.5 damage-triage signal; see docs/DAMAGE_ANNOTATION_TASK.md)")
+def dump_preds_command(model, xml_paths, plate_ids, output_dir, flag_damage) -> None:
     """Run a Kraken recognition model over unannotated PAGE XMLs, dump predictions.
 
     Generalizes scripts/dump_c2av12_preds.py: takes a model path plus either
@@ -810,6 +813,7 @@ def dump_preds_command(model, xml_paths, plate_ids, output_dir) -> None:
             xml_paths=list(xml_paths) or None,
             plate_ids=list(plate_ids) or None,
             output_dir=Path(output_dir),
+            flag_damage=flag_damage,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
