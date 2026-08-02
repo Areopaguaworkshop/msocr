@@ -10,8 +10,10 @@ Session structure:
   {id}/annotations.json - transcript per line_id, updated on each save
 """
 
+import base64
 import json
 import mimetypes
+import re
 import tempfile
 import uuid
 import shutil
@@ -31,6 +33,42 @@ from msocr.language_registry import LANGUAGE_REGISTRY, normalize_language_code
 from msocr.utils.input_loader import expand_input_to_images
 
 logger = logging.getLogger(__name__)
+
+
+_MSOCR_CUSTOM_RE = re.compile(
+    r"(?:^|\s)msocr\s*\{\s*json:([A-Za-z0-9_-]+);\s*\}"
+)
+
+
+def decode_msocr_custom(custom: str) -> Dict[str, Any]:
+    """Decode msocr's PAGE ``custom`` metadata without disturbing SegmOnto data."""
+    match = _MSOCR_CUSTOM_RE.search(custom or "")
+    if not match:
+        return {}
+    try:
+        token = match.group(1)
+        token += "=" * (-len(token) % 4)
+        value = json.loads(base64.urlsafe_b64decode(token).decode("utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+
+
+def encode_msocr_custom(custom: str, metadata: Dict[str, Any]) -> str:
+    """Merge compact, round-trippable metadata into a PAGE ``custom`` string."""
+    existing = _MSOCR_CUSTOM_RE.sub("", custom or "").strip()
+    if not metadata:
+        return existing
+    payload = json.dumps(
+        metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    token = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    encoded = f"msocr {{json:{token};}}"
+    return f"{existing} {encoded}".strip()
+
+
+class AnnotationValidationError(ValueError):
+    """Raised when fragment-aware annotation metadata is internally inconsistent."""
 
 
 class IngestionPath(Enum):
@@ -390,26 +428,150 @@ class SessionManager:
         return session
 
     def save_annotations_v2(
-        self, session_id: str, regions: List[Dict[str, Any]], lines: List[Dict[str, Any]]
+        self,
+        session_id: str,
+        regions: List[Dict[str, Any]],
+        lines: List[Dict[str, Any]],
+        gaps: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[AnnotationSession]:
-        """Store v2 drawing-UI annotation state (regions + lines with SegmOnto types + transcripts).
+        """Store validated v2 state, including fragment rows and destructive gaps.
 
         Replaces any prior v2 state. v1 `annotations` dict is untouched.
         """
         session = self.get_session(session_id)
         if session is None:
             return None
-        session.annotations_v2 = {"regions": regions, "lines": lines}
+        session.annotations_v2 = self._normalize_annotations_v2(
+            regions, lines, gaps or []
+        )
         session.updated_at = datetime.now().isoformat()
         self._save_session(session)
         logger.info(
-            "Saved v2 annotations for session %s: %d regions, %d lines",
-            session_id, len(regions), len(lines),
+            "Saved v2 annotations for session %s: %d regions, %d lines, %d gaps",
+            session_id, len(regions), len(lines), len(gaps or []),
         )
         return session
 
+    @staticmethod
+    def _normalize_annotations_v2(
+        regions: List[Dict[str, Any]],
+        lines: List[Dict[str, Any]],
+        gaps: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Copy and validate the additive fragment-aware annotation contract.
+
+        ``fragmentIndex == 0`` is the first visible piece in RTL reading order.
+        Older sessions without these optional fields remain valid and trainable.
+        """
+        normalized_regions = [dict(region) for region in regions]
+        normalized_lines: List[Dict[str, Any]] = []
+        line_by_id: Dict[str, Dict[str, Any]] = {}
+        row_indexes: Dict[str, set[int]] = {}
+
+        for raw_line in lines:
+            line = dict(raw_line)
+            # camelCase is the canonical API/session wire format. Accept the
+            # historical parser spelling on input so old sessions still load.
+            if "regionId" not in line and "region_id" in line:
+                line["regionId"] = line.pop("region_id")
+            line_id = line.get("id")
+            if not isinstance(line_id, str) or not line_id:
+                raise AnnotationValidationError("Every line must have a non-empty id")
+            if line_id in line_by_id:
+                raise AnnotationValidationError(f"Duplicate line id: {line_id}")
+
+            row_id = line.get("rowId")
+            if row_id is not None and (not isinstance(row_id, str) or not row_id.strip()):
+                raise AnnotationValidationError(f"Line {line_id}: rowId must be a non-empty string")
+            fragment_index = line.get("fragmentIndex")
+            if fragment_index is not None:
+                if isinstance(fragment_index, bool) or not isinstance(fragment_index, int) or fragment_index < 0:
+                    raise AnnotationValidationError(
+                        f"Line {line_id}: fragmentIndex must be a non-negative integer"
+                    )
+                if not row_id:
+                    raise AnnotationValidationError(
+                        f"Line {line_id}: fragmentIndex requires rowId"
+                    )
+                indexes = row_indexes.setdefault(row_id, set())
+                if fragment_index in indexes:
+                    raise AnnotationValidationError(
+                        f"Row {row_id}: duplicate fragmentIndex {fragment_index}"
+                    )
+                indexes.add(fragment_index)
+
+            trainable = line.get("trainable")
+            if trainable is not None and not isinstance(trainable, bool):
+                raise AnnotationValidationError(f"Line {line_id}: trainable must be boolean")
+            reason = line.get("exclusionReason")
+            if trainable is False and (not isinstance(reason, str) or not reason.strip()):
+                raise AnnotationValidationError(
+                    f"Line {line_id}: excluded samples require exclusionReason"
+                )
+            if trainable is not False and reason not in (None, ""):
+                raise AnnotationValidationError(
+                    f"Line {line_id}: exclusionReason requires trainable=false"
+                )
+
+            normalized_lines.append(line)
+            line_by_id[line_id] = line
+
+        normalized_gaps: List[Dict[str, Any]] = []
+        gap_ids: set[str] = set()
+        for raw_gap in gaps:
+            gap = dict(raw_gap)
+            gap_id = gap.get("id")
+            if not isinstance(gap_id, str) or not gap_id:
+                raise AnnotationValidationError("Every gap must have a non-empty id")
+            if gap_id in gap_ids:
+                raise AnnotationValidationError(f"Duplicate gap id: {gap_id}")
+            gap_ids.add(gap_id)
+
+            row_id = gap.get("rowId")
+            after_id = gap.get("afterLineId")
+            before_id = gap.get("beforeLineId")
+            if not all(isinstance(value, str) and value for value in (row_id, after_id, before_id)):
+                raise AnnotationValidationError(
+                    f"Gap {gap_id}: rowId, afterLineId, and beforeLineId are required"
+                )
+            if after_id == before_id:
+                raise AnnotationValidationError(f"Gap {gap_id}: adjacent lines must be distinct")
+            if after_id not in line_by_id or before_id not in line_by_id:
+                raise AnnotationValidationError(f"Gap {gap_id}: adjacent line id does not exist")
+            after_line = line_by_id[after_id]
+            before_line = line_by_id[before_id]
+            if after_line.get("rowId") != row_id or before_line.get("rowId") != row_id:
+                raise AnnotationValidationError(
+                    f"Gap {gap_id}: both lines must belong to row {row_id}"
+                )
+            after_index = after_line.get("fragmentIndex")
+            before_index = before_line.get("fragmentIndex")
+            if after_index is not None and before_index is not None and after_index >= before_index:
+                raise AnnotationValidationError(
+                    f"Gap {gap_id}: fragment indexes must increase in RTL reading order"
+                )
+            gap_type = gap.get("type")
+            if not isinstance(gap_type, str) or not gap_type:
+                raise AnnotationValidationError(f"Gap {gap_id}: type is required")
+            confidence = gap.get("confidence")
+            if confidence is not None and (
+                isinstance(confidence, bool)
+                or not isinstance(confidence, (int, float))
+                or not 0 <= confidence <= 1
+            ):
+                raise AnnotationValidationError(
+                    f"Gap {gap_id}: confidence must be between 0 and 1"
+                )
+            normalized_gaps.append(gap)
+
+        return {
+            "regions": normalized_regions,
+            "lines": normalized_lines,
+            "gaps": normalized_gaps,
+        }
+
     def get_annotations_v2(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Return v2 annotation state ({'regions': [...], 'lines': [...]}) or None."""
+        """Return v2 annotation state (regions, lines, and gaps) or None."""
         session = self.get_session(session_id)
         if session is None:
             return None
@@ -476,6 +638,7 @@ class SessionManager:
 
             regions: List[Dict[str, Any]] = []
             lines: List[Dict[str, Any]] = []
+            gaps: List[Dict[str, Any]] = []
 
             for region in root.findall(".//page:TextRegion", ns):
                 rid = region.get("id", f"r{len(regions)+1}")
@@ -498,14 +661,23 @@ class SessionManager:
                         uni = te.find("page:Unicode", ns)
                         if uni is not None and uni.text:
                             transcript = uni.text
-                    lines.append({
+                    parsed_line: Dict[str, Any] = {
                         "id": lid,
                         "baseline": baseline,
                         "boundary": boundary,
                         "type": ltype,
                         "transcript": transcript,
-                        "region_id": rid,
-                    })
+                        "regionId": rid,
+                    }
+                    metadata = decode_msocr_custom(line.get("custom", ""))
+                    gap_after = metadata.pop("gapAfter", None)
+                    parsed_line.update(metadata)
+                    lines.append(parsed_line)
+                    if isinstance(gap_after, dict):
+                        gap = dict(gap_after)
+                        gap.setdefault("afterLineId", lid)
+                        gap.setdefault("rowId", parsed_line.get("rowId"))
+                        gaps.append(gap)
 
             # ponytail: also catch lines not nested under a region (some XMLs
             # attach TextLine directly to Page). Rare but shouldn't be lost.
@@ -527,14 +699,23 @@ class SessionManager:
                             transcript = uni.text
                     # skip if already captured (nested path found it first)
                     if not any(ln["id"] == lid for ln in lines):
-                        lines.append({
+                        parsed_line = {
                             "id": lid,
                             "baseline": baseline,
                             "boundary": boundary,
                             "type": ltype,
                             "transcript": transcript,
-                            "region_id": None,
-                        })
+                            "regionId": None,
+                        }
+                        metadata = decode_msocr_custom(line.get("custom", ""))
+                        gap_after = metadata.pop("gapAfter", None)
+                        parsed_line.update(metadata)
+                        lines.append(parsed_line)
+                        if isinstance(gap_after, dict):
+                            gap = dict(gap_after)
+                            gap.setdefault("afterLineId", lid)
+                            gap.setdefault("rowId", parsed_line.get("rowId"))
+                            gaps.append(gap)
 
             # ponytail: parse <ReadingOrder> if present, returning the ordered
             # list of region refs so export can reproduce the same order. Empty
@@ -549,7 +730,7 @@ class SessionManager:
 
             if not regions and not lines:
                 return None
-            state: Dict[str, Any] = {"regions": regions, "lines": lines}
+            state = self._normalize_annotations_v2(regions, lines, gaps)
             if reading_order:
                 state["reading_order"] = reading_order
             return state
@@ -990,11 +1171,11 @@ class SessionManager:
         v2_lines = v2.get("lines") or []
         if v2_regions or v2_lines:
             region_ids = {str(r.get("id")) for r in v2_regions}
-            # index lines by region_id; orphans collected separately
+            # index lines by regionId; orphans collected separately
             lines_by_region: Dict[str, List[Dict[str, Any]]] = {}
             orphans: List[Dict[str, Any]] = []
             for line in v2_lines:
-                rid = line.get("region_id")
+                rid = line.get("regionId", line.get("region_id"))
                 if rid and str(rid) in region_ids:
                     lines_by_region.setdefault(str(rid), []).append(line)
                 else:
@@ -1245,8 +1426,8 @@ class SessionManager:
 
         Emits regions (with their polygon Coords) and lines (with baseline +
         boundary Coords + TextEquiv transcript). Each line is nested under its
-        actual parent region (line.get("region_id")); a line with no
-        region_id is assigned to the nearest region by baseline midpoint, or
+        actual parent region (line.get("regionId")); a line with no
+        regionId is assigned to the nearest region by baseline midpoint, or
         to a synthetic default region if no regions exist. Emits a top-to-bottom
         ``<ReadingOrder>`` so RTL Sogdian (kraken-fragmentary-manuscripts.md §4.2)
         reading order is explicit and round-trips through parse_page_xml_to_v2.
@@ -1254,6 +1435,12 @@ class SessionManager:
         state = session.annotations_v2
         regions = state.get("regions", []) or []
         lines = state.get("lines", []) or []
+        gaps = state.get("gaps", []) or []
+        gap_by_after = {
+            gap.get("afterLineId"): gap
+            for gap in gaps
+            if isinstance(gap, dict) and gap.get("afterLineId")
+        }
 
         def _pts_to_str(points) -> str:
             return " ".join(f"{int(x)},{int(y)}" for x, y in points)
@@ -1336,10 +1523,10 @@ class SessionManager:
                     best_d, best_rid = d, str(r.get("id"))
             return best_rid or str(ordered_regions[0].get("id", "region_0"))
 
-        # Group lines by their region_id (resolve orphans by nearest centroid).
+        # Group lines by their regionId (resolve orphans by nearest centroid).
         lines_by_region: Dict[str, List[Dict[str, Any]]] = {}
         for idx, line in enumerate(lines, start=1):
-            rid = line.get("region_id")
+            rid = line.get("regionId", line.get("region_id"))
             if not rid:
                 rid = _nearest_region_id(line)
             elif rid not in region_elem_by_id:
@@ -1348,19 +1535,43 @@ class SessionManager:
                 rid = _nearest_region_id(line)
             lines_by_region.setdefault(str(rid), []).append(line)
 
-        # Emit lines inside their actual parent region, ordered top-to-bottom
-        # within the region (kraken handles RTL within-region order via
-        # text_direction; we keep document order top-to-bottom by baseline y).
-        for ridx, region in enumerate(ordered_regions, start=1):
-            rid = str(region.get("id", f"r{ridx}"))
-            parent = region_elem_by_id[rid]
+        # Emit lines inside their actual parent region, ordered top-to-bottom.
+        # Regions are optional in the editor; when absent, emit every line in
+        # the synthetic region_0 instead of silently dropping all baselines.
+        emission_regions: List[Tuple[str, ET.Element]] = []
+        for index, region in enumerate(ordered_regions, start=1):
+            region_id = str(region.get("id", f"r{index}"))
+            emission_regions.append((region_id, region_elem_by_id[region_id]))
+        if not emission_regions and default_region is not None:
+            emission_regions = [("region_0", default_region)]
+        for ridx, (rid, parent) in enumerate(emission_regions, start=1):
             for idx, line in enumerate(
                 sorted(lines_by_region.get(rid, []), key=_line_cy), start=1
             ):
                 textline = ET.SubElement(parent, "TextLine")
-                textline.set("id", str(line.get("id", f"l{ridx}_{idx}")))
+                line_id = str(line.get("id", f"l{ridx}_{idx}"))
+                textline.set("id", line_id)
                 ltype = line.get("type", "DefaultLine")
-                textline.set("custom", f"structure {{type:{ltype};}}")
+                metadata = {
+                    key: line[key]
+                    for key in (
+                        "rowId",
+                        "fragmentIndex",
+                        "trainable",
+                        "exclusionReason",
+                        "confidence",
+                    )
+                    if key in line and line[key] is not None
+                }
+                gap_after = gap_by_after.get(line_id)
+                if gap_after:
+                    metadata["gapAfter"] = gap_after
+                textline.set(
+                    "custom",
+                    encode_msocr_custom(
+                        f"structure {{type:{ltype};}}", metadata
+                    ),
+                )
                 boundary = line.get("boundary") or line.get("polygon")
                 if boundary:
                     coords = ET.SubElement(textline, "Coords")

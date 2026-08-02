@@ -17,7 +17,7 @@ export default function SessionList() {
   const [error, setError] = useState<string | null>(null);
 
   const [lang, setLang] = useState("sogdian");
-  const [script, setScript] = useState("standard");
+  const [script, setScript] = useState("christian-syriac-script");
   const [fragmentPath, setFragmentPath] = useState("");
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -194,7 +194,7 @@ export default function SessionList() {
           </form>
           <div className="mt-4 flex items-center gap-2 text-xs text-stone-400">
             <FileText size={12} />
-            Sessions auto-segment via Kraken BLLA on upload.
+            New training annotations start blank; draw reviewed atomic line fragments manually.
           </div>
         </aside>
       </main>

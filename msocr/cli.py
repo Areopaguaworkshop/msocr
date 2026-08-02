@@ -122,6 +122,38 @@ def main() -> None:
     """Sogdian manuscript HTR CLI using Kraken."""
 
 
+@main.command(name="download-e27-images")
+@click.option(
+    "--manifest",
+    type=click.Path(path_type=Path),
+    default=Path("data/manifests/c2-e27-dta-sources-v1.json"),
+    show_default=True,
+    help="Tracked C2/E27 source manifest",
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override the manifest's local destination",
+)
+@click.option("--verify-only", is_flag=True, help="Verify local files without downloading")
+@click.option("--force", is_flag=True, help="Redownload files even when a valid local copy exists")
+def download_e27_images(manifest, output_dir, verify_only, force) -> None:
+    """Download or verify the confirmed C2/E27 DTA image inventory."""
+    from msocr.data.acquisition import acquire_source_images
+
+    try:
+        summary = acquire_source_images(
+            manifest,
+            output_dir=output_dir,
+            verify_only=verify_only,
+            force=force,
+        )
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    _print_json(summary)
+
+
 @main.command()
 @click.argument("input_path", type=click.Path(path_type=Path))
 @click.option("--lang", default="sogdian", show_default=True, type=LANG_CHOICES)
@@ -277,6 +309,122 @@ def preprocess(input_dir) -> None:
     output_dir = Path(input_dir) / "processed"
     preprocess_directory(str(input_dir), str(output_dir))
     click.echo(f"Preprocessed images saved to {output_dir}")
+
+
+@main.command(name="prepare-fragment-page")
+@click.argument("image", type=click.Path(path_type=Path, exists=True))
+@click.option(
+    "--output-dir",
+    default="dataset/christian_sogdian_c2av/derived",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Gitignored directory for crops, masks, proposals, and QA artefacts",
+)
+@click.option(
+    "--isolation-mode",
+    type=click.Choice(["mounted", "components"]),
+    default="mounted",
+    show_default=True,
+    help="Use mounted for DTA frame/label/ruler photographs",
+)
+@click.option(
+    "--propose-lines/--no-propose-lines",
+    default=False,
+    show_default=True,
+    help="Opt in to review-only BLLA proposals (default BLLA failed the E27 pilot)",
+)
+@click.option(
+    "--segmentation-model",
+    type=click.Path(path_type=Path, exists=True),
+    help="Optional BLLA/Orli-compatible segmentation model",
+)
+def prepare_fragment_page(
+    image: Path,
+    output_dir: Path,
+    isolation_mode: str,
+    propose_lines: bool,
+    segmentation_model: Path | None,
+) -> None:
+    """Prepare one mounted fragment photo and emit review-only line proposals."""
+    from msocr.preprocessing.pipeline import run_fragment_pipeline
+
+    try:
+        result = run_fragment_pipeline(
+            image,
+            output_dir,
+            isolation_mode=isolation_mode,
+            propose_lines=propose_lines,
+            segmentation_model=str(segmentation_model) if segmentation_model else None,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        json.dumps(
+            {
+                "source": str(image),
+                "output_dir": str(result.output_dir),
+                "physical_fragments": len(result.fragments),
+                "line_proposals": result.line_proposal_count,
+                "status": "human overlay and line review required",
+                "training_eligible": False,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@main.command(name="evaluate-layout")
+@click.option(
+    "--ground-truth",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Reviewed PAGE XML with atomic fragment baselines",
+)
+@click.option(
+    "--predictions",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Common BLLA/Orli .segments.json output",
+)
+@click.option(
+    "--distance-tolerance",
+    default=15.0,
+    show_default=True,
+    type=float,
+    help="Maximum symmetric mean baseline distance in pixels",
+)
+@click.option(
+    "--report",
+    type=click.Path(path_type=Path),
+    help="Optional JSON report path",
+)
+def evaluate_layout_command(
+    ground_truth: Path,
+    predictions: Path,
+    distance_tolerance: float,
+    report: Path | None,
+) -> None:
+    """Compare BLLA or Orli layout output against reviewed PAGE geometry."""
+    from msocr.data.session_manager import SessionManager
+    from msocr.evaluation.layout_metrics import evaluate_layout
+
+    if distance_tolerance <= 0:
+        raise click.ClickException("--distance-tolerance must be positive")
+    with tempfile.TemporaryDirectory(prefix="msocr-layout-eval-") as temp_dir:
+        manager = SessionManager(Path(temp_dir) / "sessions")
+        reference = manager.parse_page_xml_to_v2(ground_truth.read_bytes())
+    if reference is None:
+        raise click.ClickException("Ground-truth PAGE XML has no readable regions or lines")
+    prediction = json.loads(predictions.read_text(encoding="utf-8"))
+    result = evaluate_layout(
+        reference, prediction, distance_tolerance=distance_tolerance
+    )
+    rendered = json.dumps(result, ensure_ascii=False, indent=2)
+    if report is not None:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(rendered, encoding="utf-8")
+    click.echo(rendered)
 
 
 def _parse_roi(roi: str | None) -> tuple[int, int, int, int] | None:

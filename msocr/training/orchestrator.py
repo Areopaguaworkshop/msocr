@@ -11,11 +11,13 @@ Ponytail: if we need durable parallelism later, wrap this in RQ.
 """
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
 from msocr.data.manifest import load_frozen_manifest, iter_style_group_cases
 from msocr.training.runpod_runner import RunPodRunner
+from msocr.training.page_export import compile_training_page_xml
 from msocr.evaluation.harness import run_evaluation
 
 # kraken 7.0.2 crashes on checkpoint save when training from scratch
@@ -198,10 +200,10 @@ def walk_style_group(
     base_override = sg.get("base_model_override")
     # ponytail: resolve base model in priority order — explicit arg > style_group
     # override > manifest script_block default. None of these = train from scratch.
-    if base_override:
-        load_model = base_override
-    elif base_model_path:
+    if base_model_path:
         load_model = base_model_path
+    elif base_override:
+        load_model = base_override
     else:
         from msocr.language_registry import default_base_model_for_script_block
         default = default_base_model_for_script_block(manifest.script_block)
@@ -227,6 +229,7 @@ def walk_style_group(
         train_manifest_lines: list[str] = []
         val_manifest_lines: list[str] = []
         pre_train_upload: list[tuple[str, str]] = []
+        export_audits: list[dict] = []
         all_cases = [("train", c, train_manifest_lines) for c in train_cases] + \
                     [("val", c, val_manifest_lines) for c in val_cases]
         for idx, (part, c, manifest_lines) in enumerate(all_cases):
@@ -234,12 +237,26 @@ def walk_style_group(
                 continue
             image = _resolve_image_for_xml(c.xml_path, c.image)
             remote_img_name = f"{part}_{idx}.png"
+            training_xml = tmp_path / f"{part}_{idx}_training.xml"
+            try:
+                audit = compile_training_page_xml(c.xml_path, training_xml)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Cannot compile Kraken training XML {c.xml_path}: {exc}"
+                ) from exc
+            audit.update({"partition": part, "case_id": c.id})
+            export_audits.append(audit)
+            if audit["included_count"] == 0:
+                continue
             # ponytail: cache key — source xml path + mtime + size + target image
             # name. If the source XML or image changes, the key changes and we
             # re-polygonize. Idempotent: a hit returns the cached enriched file.
             src_stat = c.xml_path.stat()
             import hashlib
-            key_src = f"{c.xml_path}|{src_stat.st_mtime_ns}|{src_stat.st_size}|{remote_img_name}"
+            key_src = (
+                f"training-page-v1|{c.xml_path}|{src_stat.st_mtime_ns}|"
+                f"{src_stat.st_size}|{remote_img_name}"
+            )
             key = hashlib.sha1(key_src.encode()).hexdigest()
             cached = cache_dir / f"{key}.xml"
             enriched_xml = tmp_path / f"{part}_{idx}_poly.xml"
@@ -250,7 +267,12 @@ def walk_style_group(
                 # re-polygonizing ~1.1 min/folio.
                 enriched_xml.write_bytes(cached.read_bytes())
             else:
-                _enrich_xml_with_polygons(c.xml_path, image, enriched_xml, target_image_name=remote_img_name)
+                _enrich_xml_with_polygons(
+                    training_xml,
+                    image,
+                    enriched_xml,
+                    target_image_name=remote_img_name,
+                )
                 # Write atomically: copy to a temp then rename, so a crash mid-
                 # write never leaves a partial cache entry.
                 tmp_cache = cached.with_suffix(".xml.tmp")
@@ -261,6 +283,31 @@ def walk_style_group(
             pre_train_upload.append((str(enriched_xml), remote_xml))
             pre_train_upload.append((str(image), remote_img))
             manifest_lines.append(remote_xml)
+
+        if not train_manifest_lines:
+            raise ValueError(
+                f"No eligible training lines in style_group {style_group_id!r}"
+            )
+        audit_dir = Path(reports_dir)
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        (audit_dir / f"{manifest.manifest_id}-{style_group_id}-training-export.json").write_text(
+            json.dumps(
+                {
+                    "manifest_id": manifest.manifest_id,
+                    "style_group_id": style_group_id,
+                    "included_count": sum(a["included_count"] for a in export_audits),
+                    "excluded_count": sum(a["excluded_count"] for a in export_audits),
+                    "pages": export_audits,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        if not val_manifest_lines:
+            raise ValueError(
+                f"No eligible validation lines in style_group {style_group_id!r}"
+            )
 
         train_manifest = tmp_path / "train_manifest.txt"
         val_manifest = tmp_path / "val_manifest.txt"

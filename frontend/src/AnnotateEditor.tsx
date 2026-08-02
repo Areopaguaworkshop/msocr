@@ -17,6 +17,7 @@ import {
 } from "@phosphor-icons/react";
 import type {
   AnnotationState,
+  Gap,
   Line,
   LineType,
   Mode,
@@ -116,6 +117,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   const [lineWidth, setLineWidth] = useState<number>(3);
   const [regions, setRegions] = useState<Region[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
+  const [gaps, setGaps] = useState<Gap[]>([]);
   // ponytail: boot gate — block saves until the initial load has resolved.
   // Without this, a click before the fetch returns flips `dirty`, the 2s
   // autosave timer fires save() with the empty initial state, and the server
@@ -188,17 +190,12 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
           loadImageSize(imageUrl),
           fetch(`/api/sessions/${sessionId}/annotations`),
         ]);
-        const saved: AnnotationState = savedRes.ok ? await savedRes.json() : { regions: [], lines: [] };
-        let nextRegions = saved.regions ?? [];
-        let nextLines = saved.lines ?? [];
-        if (!nextRegions.length && !nextLines.length) {
-          const sugRes = await fetch(`/api/sessions/${sessionId}/autosuggest`);
-          if (sugRes.ok) {
-            const sug = await sugRes.json();
-            nextRegions = sug.regions ?? [];
-            nextLines = sug.lines ?? [];
-          }
-        }
+        const saved: AnnotationState = savedRes.ok
+          ? await savedRes.json()
+          : { regions: [], lines: [], gaps: [] };
+        const nextRegions = saved.regions ?? [];
+        const nextLines = saved.lines ?? [];
+        const nextGaps = saved.gaps ?? [];
         if (disposed) return;
 
         setRegions(
@@ -210,9 +207,8 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             }))
             .filter((r) => r.polygon.length >= 3),
         );
-        setLines(
-          (nextLines || [])
-            .map((l, i) => ({
+        const loadedLines: Line[] = (nextLines || [])
+          .map((l, i) => ({
               id: l.id || `l${i + 1}`,
               baseline: (l.baseline || []).map(normalizePoint),
               boundary: (l.boundary || []).map(normalizePoint),
@@ -227,9 +223,17 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               regionId: typeof (l as { regionId?: string | null }).regionId === "string"
                 ? (l as { regionId?: string | null }).regionId
                 : null,
-            }))
-            .filter((l) => l.baseline.length >= 2),
-        );
+              rowId: typeof l.rowId === "string" ? l.rowId : null,
+              fragmentIndex: typeof l.fragmentIndex === "number" ? l.fragmentIndex : null,
+              trainable: l.trainable !== false,
+              exclusionReason: typeof l.exclusionReason === "string" ? l.exclusionReason : null,
+          }))
+          .filter((l) => l.baseline.length >= 2);
+        const loadedLineIds = new Set(loadedLines.map((line) => line.id));
+        setLines(loadedLines);
+        setGaps(nextGaps.filter(
+          (gap) => loadedLineIds.has(gap.afterLineId) && loadedLineIds.has(gap.beforeLineId),
+        ));
         // ponytail: release the save gate only after loaded state is committed.
         setBooted(true);
 
@@ -416,15 +420,16 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     const res = await fetch(`/api/sessions/${sessionId}/annotations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ regions, lines }),
+      body: JSON.stringify({ regions, lines, gaps }),
     });
     if (res.ok) {
       setDirty(false);
       setStatus(`saved ${new Date().toLocaleTimeString()}`);
     } else {
-      setStatus("save failed");
+      const detail = (await res.text()).slice(0, 160);
+      setStatus(`save failed: ${detail}`);
     }
-  }, [sessionId, regions, lines, booted]);
+  }, [sessionId, regions, lines, gaps, booted]);
 
   const handleImportXml = useCallback(async () => {
     const file = fileInputRef.current?.files?.[0];
@@ -467,9 +472,8 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
           }))
           .filter((r) => r.polygon.length >= 3),
       );
-      setLines(
-        nextLines
-          .map((l, i) => ({
+      const importedLines: Line[] = nextLines
+        .map((l, i) => ({
             id: l.id || `l${i + 1}`,
             baseline: (l.baseline || []).map(normalizePoint),
             boundary: (l.boundary || []).map(normalizePoint),
@@ -483,9 +487,17 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             regionId: typeof (l as { regionId?: string | null }).regionId === "string"
               ? (l as { regionId?: string | null }).regionId
               : null,
-          }))
-          .filter((l) => l.baseline.length >= 2),
-      );
+            rowId: typeof l.rowId === "string" ? l.rowId : null,
+            fragmentIndex: typeof l.fragmentIndex === "number" ? l.fragmentIndex : null,
+            trainable: l.trainable !== false,
+            exclusionReason: typeof l.exclusionReason === "string" ? l.exclusionReason : null,
+        }))
+        .filter((l) => l.baseline.length >= 2);
+      const importedLineIds = new Set(importedLines.map((line) => line.id));
+      setLines(importedLines);
+      setGaps((saved.gaps ?? []).filter(
+        (gap) => importedLineIds.has(gap.afterLineId) && importedLineIds.has(gap.beforeLineId),
+      ));
       setDirty(false);
       setStatus(`imported ${body.regions ?? "?"} regions, ${body.lines ?? "?"} lines`);
     } catch (err) {
@@ -505,10 +517,17 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
 
   // save on unload
   useEffect(() => {
-    const handler = () => { if (booted && dirty) navigator.sendBeacon(`/api/sessions/${sessionId}/annotations`, JSON.stringify({ regions, lines })); };
+    const handler = () => {
+      if (booted && dirty) {
+        navigator.sendBeacon(
+          `/api/sessions/${sessionId}/annotations`,
+          JSON.stringify({ regions, lines, gaps }),
+        );
+      }
+    };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty, regions, lines, sessionId]);
+  }, [booted, dirty, regions, lines, gaps, sessionId]);
 
   // ponytail: delete is mode-scoped — Region mode touches regions only,
   // Baseline mode touches baselines only. Prevents accidentally nuking the
@@ -521,6 +540,9 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       markDirty();
     } else if (mode === "baseline" && selected.kind === "line") {
       setLines((items) => items.filter((i) => i.id !== selected.id));
+      setGaps((items) => items.filter(
+        (gap) => gap.afterLineId !== selected.id && gap.beforeLineId !== selected.id,
+      ));
       setSelected(null);
       markDirty();
     }
@@ -530,6 +552,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     if (lines.length === 0) return;
     if (!window.confirm(`Delete all ${lines.length} baselines? Regions are kept. This cannot be undone.`)) return;
     setLines([]);
+    setGaps([]);
     setSelected(null);
     markDirty();
   }
@@ -571,7 +594,15 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     const region = regions.find((r) => r.id === selected.id);
     if (!region) return;
     const before = lines.length;
-    setLines((items) => items.filter((l) => !pointInPolygon(baselineMidpoint(l), region.polygon)));
+    const removedIds = new Set(
+      lines
+        .filter((line) => pointInPolygon(baselineMidpoint(line), region.polygon))
+        .map((line) => line.id),
+    );
+    setLines((items) => items.filter((line) => !removedIds.has(line.id)));
+    setGaps((items) => items.filter(
+      (gap) => !removedIds.has(gap.afterLineId) && !removedIds.has(gap.beforeLineId),
+    ));
     const removed = before - lines.length;
     if (removed > 0) markDirty();
   }
@@ -655,6 +686,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
   function deleteActiveVertex() {
     if (activeVertexIndex == null || !selectedLine) return;
     const idx = activeVertexIndex;
+    const deletesLine = selectedLine.baseline.length <= 2;
     setLines((items) =>
       items
         .map((l) => {
@@ -664,6 +696,11 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         })
         .filter((l) => l.baseline.length >= 2),
     );
+    if (deletesLine) {
+      setGaps((items) => items.filter(
+        (gap) => gap.afterLineId !== selectedLine.id && gap.beforeLineId !== selectedLine.id,
+      ));
+    }
     setActiveVertexIndex(null);
     markDirty();
   }
@@ -700,6 +737,14 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
     const a = lines.find((l) => l.id === ids[0]);
     const b = lines.find((l) => l.id === ids[1]);
     if (!a || !b) return;
+    if (a.rowId || b.rowId || gaps.some(
+      (gap) => ids.includes(gap.afterLineId) || ids.includes(gap.beforeLineId),
+    )) {
+      window.alert(
+        "These are logical-row fragments. Do not join a baseline across a hole; keep each visible piece as a separate training sample.",
+      );
+      return;
+    }
     // dedup shared endpoint: if a's last point == b's first point, drop b's first.
     const aEnd = a.baseline[a.baseline.length - 1];
     const bStart = b.baseline[0];
@@ -753,6 +798,84 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
       withY.sort((a, b) => a.cy - b.cy);
       return withY.map((x) => x.l);
     });
+    markDirty();
+  }
+
+  function groupSelectedFragments() {
+    const selectedFragments = lines.filter((line) => selectedLineIds.has(line.id));
+    if (selectedFragments.length < 2) return;
+    // Sogdian is RTL: the rightmost visible fragment is index 0. This is only
+    // applied after an explicit human grouping action; Kraken never guesses it.
+    selectedFragments.sort((a, b) => {
+      const ax = Math.max(...a.baseline.map((point) => point[0]));
+      const bx = Math.max(...b.baseline.map((point) => point[0]));
+      return bx - ax;
+    });
+    const rowId = `row-${Date.now()}`;
+    const indexById = new Map(selectedFragments.map((line, index) => [line.id, index]));
+    const gapPolygonBetween = (first: Line, second: Line): Point[] => {
+      const firstEdge = Math.min(...first.baseline.map((point) => point[0]));
+      const secondEdge = Math.max(...second.baseline.map((point) => point[0]));
+      const gapLeft = Math.min(firstEdge, secondEdge);
+      const gapRight = Math.max(firstEdge, secondEdge);
+      const rowY = [...first.baseline, ...second.baseline]
+        .reduce((sum, point) => sum + point[1], 0)
+        / (first.baseline.length + second.baseline.length);
+      const damage = regions.find((region) => {
+        if (region.type !== "DamageZone" || region.polygon.length < 3) return false;
+        const xs = region.polygon.map((point) => point[0]);
+        const ys = region.polygon.map((point) => point[1]);
+        return Math.max(...xs) >= gapLeft
+          && Math.min(...xs) <= gapRight
+          && Math.min(...ys) <= rowY
+          && Math.max(...ys) >= rowY;
+      });
+      return damage?.polygon ?? [];
+    };
+    setLines((items) => items.map((line) =>
+      indexById.has(line.id)
+        ? { ...line, rowId, fragmentIndex: indexById.get(line.id)! }
+        : line,
+    ));
+    setGaps((items) => {
+      const selectedIds = new Set(selectedFragments.map((line) => line.id));
+      const retained = items.filter(
+        (gap) => !selectedIds.has(gap.afterLineId) && !selectedIds.has(gap.beforeLineId),
+      );
+      const rowGaps: Gap[] = selectedFragments.slice(0, -1).map((line, index) => ({
+        id: `gap-${Date.now()}-${index}`,
+        rowId,
+        afterLineId: line.id,
+        beforeLineId: selectedFragments[index + 1].id,
+        type: "hole",
+        polygon: gapPolygonBetween(line, selectedFragments[index + 1]),
+        confidence: null,
+      }));
+      return retained.concat(rowGaps);
+    });
+    setSelectedLineIds(new Set());
+    markDirty();
+  }
+
+  function toggleTrainingEligibility(line: Line) {
+    if (line.trainable !== false) {
+      const reason = window.prompt(
+        "Why must this sample be excluded from Kraken training?",
+        "edge glyph is bisected or unreadable",
+      );
+      if (!reason?.trim()) return;
+      setLines((items) => items.map((item) =>
+        item.id === line.id
+          ? { ...item, trainable: false, exclusionReason: reason.trim() }
+          : item,
+      ));
+    } else {
+      setLines((items) => items.map((item) =>
+        item.id === line.id
+          ? { ...item, trainable: true, exclusionReason: null }
+          : item,
+      ));
+    }
     markDirty();
   }
 
@@ -1004,9 +1127,16 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
         />
         <a
           href={`/api/sessions/${sessionId}/export?format=page`}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors"
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-lg border border-stone-300 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
         >
-          <DownloadSimple size={14} /> PAGE XML
+          <DownloadSimple size={14} /> Full PAGE
+        </a>
+        <a
+          href={`/api/sessions/${sessionId}/export?format=page&training=true`}
+          className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors"
+          title="Compile only reviewed, eligible contiguous lines; excluded samples are physically omitted"
+        >
+          <DownloadSimple size={14} /> Training PAGE
         </a>
       </header>
 
@@ -1321,6 +1451,22 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             ))}
           </div>
 
+          {selectedLineIds.size >= 2 && (
+            <div className="p-2 border-b border-stone-200 dark:border-stone-800 bg-amber-50 dark:bg-amber-900/20">
+              <button
+                type="button"
+                onClick={groupSelectedFragments}
+                className="w-full px-2 py-1.5 text-xs rounded bg-accent text-white hover:bg-accent/90"
+                title="Create one human-confirmed logical row, ordered right-to-left, with structural hole gaps"
+              >
+                Group {selectedLineIds.size} fragments as one RTL row
+              </button>
+              <p className="mt-1 text-[10px] text-stone-500">
+                Keeps separate baselines and training samples; never draws across the hole.
+              </p>
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto">
             <ol className="divide-y divide-stone-100 dark:divide-stone-800">
               {lines.map((line, i) => {
@@ -1341,7 +1487,19 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                         ? "bg-amber-50 dark:bg-amber-900/20"
                         : "hover:bg-stone-100 dark:hover:bg-stone-900"
                   }`}
-                  onClick={() => { if (selectedLineIds.size > 0) setSelectedLineIds(new Set()); selectLine(line.id, true); }}
+                  onClick={(event) => {
+                    if (event.shiftKey) {
+                      setSelectedLineIds((current) => {
+                        const next = new Set(current);
+                        if (next.has(line.id)) next.delete(line.id);
+                        else next.add(line.id);
+                        return next;
+                      });
+                      return;
+                    }
+                    if (selectedLineIds.size > 0) setSelectedLineIds(new Set());
+                    selectLine(line.id, true);
+                  }}
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-stone-400 w-5 shrink-0">{i + 1}</span>
@@ -1406,6 +1564,31 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
                         {(line.confidence * 100).toFixed(0)}%
                       </span>
                     )}
+                    {line.rowId && line.fragmentIndex != null && (
+                      <span
+                        className="text-[9px] font-mono px-1 rounded shrink-0 text-sky-700 dark:text-sky-300"
+                        title={`${line.rowId}; fragment 0 is first in RTL reading order`}
+                      >
+                        row:{line.fragmentIndex}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleTrainingEligibility(line);
+                      }}
+                      className={`text-[9px] px-1 rounded shrink-0 ${
+                        line.trainable === false
+                          ? "text-red-700 bg-red-100 dark:text-red-300 dark:bg-red-900/30"
+                          : "text-green-700 bg-green-100 dark:text-green-300 dark:bg-green-900/30"
+                      }`}
+                      title={line.trainable === false
+                        ? `Excluded: ${line.exclusionReason ?? "no reason"}. Click to include.`
+                        : "Included in Kraken training. Click to exclude with a reason."}
+                    >
+                      {line.trainable === false ? "train ✕" : "train ✓"}
+                    </button>
                     <span className="text-[11px] text-stone-300 cursor-grab active:cursor-grabbing group-hover:text-stone-500 ml-auto" title="drag to reorder">⠿</span>
                   </div>
                   <div className="font-mono text-xs text-stone-700 dark:text-stone-300 mt-1 truncate text-left">
@@ -1491,7 +1674,8 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             </div>
 
             <p className="text-stone-600 dark:text-stone-400 mb-4">
-              The page auto-segments on load (Kraken BLLA) — you review, fix, and transcribe.
+              New fragmented-manuscript sessions start blank because default Kraken BLLA
+              failed the E27 pilot. Draw and transcribe atomic visible line fragments manually.
               All changes auto-save after 2 seconds of inactivity.
             </p>
 
@@ -1499,8 +1683,9 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
             <ol className="list-decimal pl-5 space-y-1 text-stone-700 dark:text-stone-300">
               <li><b>Regions</b> (R): optional — enclose text areas. Click points, double-click to close. Pick the right type from the top-left palette (DamageZone is now default-visible for fragmentary folios). <b>Not required for Kraken training.</b></li>
               <li><b>Baselines</b> (B): the reading line under each line of text. Click start, click end — that's it.</li>
+              <li><b>Fragmented rows</b>: Shift-click each disconnected visible piece in the line list, then choose <i>Group fragments as one RTL row</i>. The pieces remain separate Kraken samples; the hole is saved as structural metadata.</li>
               <li><b>Transcribe</b> (T): select a baseline, type the Sogdian text (Sims-Williams Latin transliteration) in the right panel. Press <code>Enter</code> to save and jump to the next line.</li>
-              <li><b>Export</b>: click <i>PAGE XML</i> in the top bar to download for Kraken training.</li>
+              <li><b>Export</b>: keep <i>Full PAGE</i> as the annotation source of truth. Use <i>Training PAGE</i> for Kraken; it physically omits excluded or unsafe lines.</li>
             </ol>
 
             <h3 className="font-semibold mt-4 mb-2">Modes</h3>
@@ -1546,7 +1731,7 @@ export default function AnnotateEditor({ sessionId }: { sessionId: string }) {
               <li><kbd>Ctrl</kbd>+<kbd>S</kbd> — save now</li>
               <li><kbd>Ctrl</kbd>+<kbd>Del</kbd> — delete the active baseline vertex (drag a vertex first to mark it active; line kept if ≥2 points remain)</li>
               <li><kbd>I</kbd> — invert reading direction of the selected line (reverses baseline + boundary point order)</li>
-              <li><kbd>J</kbd> — join the first two selected lines (concat baselines, dedup shared endpoint, join transcripts with a space, drop the second)</li>
+              <li><kbd>J</kbd> — join two ordinary geometry segments only. It is blocked for logical-row fragments so a baseline cannot cross a hole.</li>
               <li><kbd>Y</kbd> — link the selected line to a region (cycles through regions if more than one)</li>
               <li><kbd>U</kbd> — unlink the selected line from its region (→ orphan, yellow dashed outline + ⚠ badge)</li>
               <li><kbd>Shift</kbd>+<kbd>L</kbd> — auto-sort lines top-to-bottom by baseline centroid Y (reading order is the array index, never stored)</li>

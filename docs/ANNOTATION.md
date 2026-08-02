@@ -1,7 +1,7 @@
 # How to annotate a Sogdian manuscript page
 
 This guide walks through annotating one manuscript page in the msocr annotation
-editor (`http://localhost:5173`). The output is a PAGE XML file you can feed to
+editor (`http://localhost:8001`). The output is a PAGE XML file you can feed to
 Kraken `ketos train` to fine-tune the Sogdian HTR model.
 
 ## What you are doing
@@ -22,27 +22,22 @@ Start the servers:
 
 ```bash
 uv run msocr annotation-api --host 127.0.0.1 --port 8001
-# in another shell, the Vite dev server for hot reload:
-cd frontend && npm run dev
 ```
 
-Open `http://localhost:5173`. You will see existing sessions and a
+Open `http://localhost:8001`. You will see existing sessions and a
 "New session" form. To create one:
 
 - **Language**: `sogdian`
-- **Script variant**: `manuscript` (default)
-- **Source**: a short label for the manuscript (e.g. `SO14082r`)
-- **Ingestion path**: `local_file`
-- **Image path**: absolute path to a page PNG on this machine
-- **Crop manuscript area**: leave unchecked unless the scan has a ruler or
-  frame you want to crop out.
+- **Script variant**: `christian-syriac-script`
+- **Fragment path**: absolute path to the reviewed, deskewed fragment PNG on
+  this machine, such as a `prepare-fragment-page` output under
+  `..._fragments/fragments/frag_001.png`.
 
 Submit. You will be redirected to the editor at `/ui/<session_id>`.
 
-On first load the editor calls `/api/sessions/<id>/autosuggest`, which runs
-Kraken BLLA segmentation. After a few seconds you will see proposed regions
-and baselines overlaid on the image. Your job is to review and fix them, then
-transcribe.
+Fragmented-manuscript sessions start with no v2 baselines. Default Kraken BLLA
+failed the E27 pilot and therefore must not silently initialize training ground
+truth. Draw atomic visible line-fragment baselines manually, then transcribe.
 
 ## 2. Regions (press `R`)
 
@@ -141,9 +136,8 @@ downloads a `.page.xml` file containing:
 
 ## 7. Tips
 
-- **Trust the auto-segment, then fix.** Kraken BLLA gets ~80% of baselines
-  right on a clean scan. Spend your time on the ones that are wrong, not on
-  redrawing correct ones.
+- **Do not join across holes.** Draw each contiguous visible piece as a separate
+  baseline and training sample, then group related pieces as one logical RTL row.
 - **Draw baselines under the text, not through it.** Kraken reads upward from
   the baseline, so place it at the *bottom* of the line of script.
 - **Transcribe what you see, not what you expect.** Damaged or ambiguous
@@ -157,8 +151,9 @@ downloads a `.page.xml` file containing:
 
 - **Image does not load** — check the path you gave in the new-session form
   is readable by the server process.
-- **Auto-segment returns nothing** — Kraken did not find any baselines. Draw
-  them manually with `B`; regions are optional for training.
+- **A new session has no baselines** — this is intentional for fragmented C2
+  material. Draw them manually with `B`; regions are optional for recognition
+  training.
 - **Zoom/pan does not work** — you are in `R` or `B` mode. Press `V` to
   navigate. The SVG overlay only captures clicks in draw modes.
 - **Save shows "save failed"** — the backend is not running on port 8001.

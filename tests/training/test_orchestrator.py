@@ -118,11 +118,12 @@ def test_walk_style_group_builds_train_cmd_and_runs_eval(tmp_path):
     assert any(p.endswith(".xml") for p in remote_paths)
     assert any(p.endswith(".png") for p in remote_paths)
 
-    # setup_cmds defaults to kraken-install + checkpoint patch.
+    # setup_cmds defaults to kraken-install + checkpoint + safetensors patches.
     setup = kwargs["setup_cmds"]
-    assert len(setup) == 2
+    assert len(setup) == 3
     assert "kraken" in setup[0]
     assert "self.net is not None" in setup[1]
+    assert "shared-tensor-patch" in setup[2]
 
     fake_eval.assert_called_once()
     _, eval_kwargs = fake_eval.call_args
@@ -212,3 +213,40 @@ def test_walk_style_group_resolves_script_block_default_base(tmp_path):
     assert "--load" in cmd and "--resize" in cmd
     uploads = kwargs["pre_train_upload"]
     assert any(dst == "/workspace/base.safetensors" for _, dst in uploads)
+
+
+def test_explicit_base_model_wins_over_manifest_style_override(tmp_path):
+    override = tmp_path / "override.safetensors"
+    override.write_bytes(b"override")
+    explicit = tmp_path / "explicit.safetensors"
+    explicit.write_bytes(b"explicit")
+    manifest_path = _make_manifest(
+        tmp_path,
+        style_groups={
+            "g1": {
+                "manuscript_ids": ["M1", "M2", "M3"],
+                "base_model_override": str(override),
+            }
+        },
+    )
+    fake_runner = MagicMock()
+    fake_runner.run_training.return_value = "/tmp/out.safetensors"
+
+    with patch("msocr.training.orchestrator._enrich_xml_with_polygons", _mock_enrich), \
+         patch("msocr.training.orchestrator.run_evaluation", return_value={}):
+        walk_style_group(
+            manifest_path=str(manifest_path),
+            style_group_id="g1",
+            runner=fake_runner,
+            base_model_path=str(explicit),
+            output_model_path="/tmp/out.safetensors",
+            reports_dir=tmp_path / "reports",
+        )
+
+    _, kwargs = fake_runner.run_training.call_args
+    uploaded_base = next(
+        local
+        for local, remote in kwargs["pre_train_upload"]
+        if remote == "/workspace/base.safetensors"
+    )
+    assert uploaded_base == str(explicit)

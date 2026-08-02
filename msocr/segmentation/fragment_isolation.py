@@ -9,7 +9,7 @@ via Kraken (Phase 4).
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -27,6 +27,153 @@ class Fragment:
     bbox: tuple[int, int, int, int]  # (left, top, right, bottom)
     area: int
     flagged: str | None
+
+
+def _contiguous_groups(values: np.ndarray) -> list[list[int]]:
+    groups: list[list[int]] = []
+    for value in values:
+        number = int(value)
+        if not groups or number > groups[-1][-1] + 1:
+            groups.append([number])
+        else:
+            groups[-1].append(number)
+    return groups
+
+
+def _mounted_inner_frame(gray: np.ndarray) -> tuple[int, int, int, int]:
+    """Find the inside of the dark DTA photographic frame."""
+    height, width = gray.shape
+    dark = gray < 50
+    row_density = dark.mean(axis=1)
+    column_density = dark.mean(axis=0)
+
+    def _edge(density: np.ndarray, length: int, start: bool) -> int:
+        indexes = np.where(density > 0.65)[0]
+        indexes = (
+            indexes[indexes < length * 0.18]
+            if start
+            else indexes[indexes > length * 0.82]
+        )
+        groups = [group for group in _contiguous_groups(indexes) if len(group) >= 3]
+        if not groups:
+            return 0 if start else length
+        band = max(
+            groups,
+            key=lambda group: len(group) * float(density[group].mean()),
+        )
+        return band[-1] + 1 if start else band[0]
+
+    return (
+        _edge(column_density, width, True),
+        _edge(row_density, height, True),
+        _edge(column_density, width, False),
+        _edge(row_density, height, False),
+    )
+
+
+def isolate_mounted_fragment(
+    image: Image.Image,
+) -> tuple[Fragment, np.ndarray] | None:
+    """Isolate the central physical fragment in a mounted DTA photograph.
+
+    The E27 downloads contain one target fragment on a pale mount plus a dark
+    frame, labels, and often a ruler. Ink-component DBSCAN cannot separate
+    those reliably. This DTA-specific path removes the frame, seeds GrabCut
+    from parchment/ink color, rejects components connected to the frame, and
+    chooses the large component nearest the image center. The returned mask is
+    full-page sized and must still pass human overlay QA before annotation.
+    """
+    rgb = np.array(image.convert("RGB"))
+    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    left, top, right, bottom = _mounted_inner_frame(gray)
+    if right - left < 10 or bottom - top < 10:
+        return None
+
+    crop = bgr[top:bottom, left:right]
+    height, width = crop.shape[:2]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    grabcut_mask = np.full((height, width), cv2.GC_PR_BGD, dtype=np.uint8)
+    pad = max(3, int(min(width, height) * 0.025))
+    grabcut_mask[:pad] = cv2.GC_BGD
+    grabcut_mask[-pad:] = cv2.GC_BGD
+    grabcut_mask[:, :pad] = cv2.GC_BGD
+    grabcut_mask[:, -pad:] = cv2.GC_BGD
+    probable_foreground = (value < 210) | (saturation > 65)
+    grabcut_mask[probable_foreground] = cv2.GC_PR_FGD
+    grabcut_mask[(value < 100) & probable_foreground] = cv2.GC_FGD
+
+    background_model = np.zeros((1, 65), np.float64)
+    foreground_model = np.zeros((1, 65), np.float64)
+    cv2.grabCut(
+        crop,
+        grabcut_mask,
+        None,
+        background_model,
+        foreground_model,
+        5,
+        cv2.GC_INIT_WITH_MASK,
+    )
+    foreground = np.where(
+        (grabcut_mask == cv2.GC_FGD) | (grabcut_mask == cv2.GC_PR_FGD),
+        255,
+        0,
+    ).astype(np.uint8)
+    kernel_size = max(7, int(min(width, height) * 0.015) // 2 * 2 + 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    foreground = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(foreground, 8)
+    candidates: list[tuple[float, int]] = []
+    for label in range(1, count):
+        x, y, component_width, component_height, area = (
+            int(value) for value in stats[label]
+        )
+        if area < height * width * 0.002:
+            continue
+        if (
+            x == 0
+            or y == 0
+            or x + component_width == width
+            or y + component_height == height
+        ):
+            continue
+        center_x, center_y = centroids[label]
+        distance = ((center_x - width / 2) / (width / 2)) ** 2 + (
+            (center_y - height / 2) / (height / 2)
+        ) ** 2
+        candidates.append((area / (1 + distance * 2), label))
+    if not candidates:
+        return None
+
+    _, selected_label = max(candidates)
+    x, y, component_width, component_height, area = (
+        int(value) for value in stats[selected_label]
+    )
+    full_mask = np.zeros(gray.shape, dtype=np.uint8)
+    full_mask[top:bottom, left:right] = np.where(
+        labels == selected_label, 255, 0
+    ).astype(np.uint8)
+    bbox = _clamp_roi(
+        (
+            left + x - 15,
+            top + y - 15,
+            left + x + component_width + 15,
+            top + y + component_height + 15,
+        ),
+        image.size,
+    )
+    return (
+        Fragment(
+            fragment_id="frag_001",
+            bbox=bbox,
+            area=area,
+            flagged=None,
+        ),
+        full_mask,
+    )
 
 
 def _sauvola_ink_components(
@@ -91,9 +238,7 @@ def isolate_fragments(
 
     fragments: list[Fragment] = []
     for order, (top, left, right, bottom, area, _) in enumerate(raw, start=1):
-        bbox = _clamp_roi(
-            (left - 20, top - 20, right + 20, bottom + 20), image.size
-        )
+        bbox = _clamp_roi((left - 20, top - 20, right + 20, bottom + 20), image.size)
         flagged = "FRAGMENT_TOO_SMALL" if area < min_fragment_area else None
         fragments.append(
             Fragment(
@@ -174,7 +319,9 @@ if __name__ == "__main__":
     fragments = isolate_fragments(
         page, sauvola_window=51, min_component_area=50, min_fragment_area=5000
     )
-    assert len(fragments) == 3, f"expected 3 fragments, got {len(fragments)}: {fragments}"
+    assert (
+        len(fragments) == 3
+    ), f"expected 3 fragments, got {len(fragments)}: {fragments}"
 
     for frag, (x0, y0, x1, y1) in zip(fragments, rects):
         left, top, right, bottom = frag.bbox

@@ -213,13 +213,75 @@ def test_v2_annotations_roundtrip_and_page_export(tmp_path):
         lines=[LineSegment(line_id="line_001", order=1)],
     )
     regions = [{"id": "r1", "polygon": [[10, 10], [100, 10], [100, 200], [10, 200]], "type": "MainZone"}]
-    lines = [{"id": "l1", "baseline": [[15, 50], [95, 50]], "type": "DefaultLine", "transcript": "test"}]
-    manager.save_annotations_v2(session.session_id, regions, lines)
+    lines = [
+        {
+            "id": "l1",
+            "baseline": [[55, 50], [95, 50]],
+            "boundary": [],
+            "type": "DefaultLine",
+            "transcript": "test",
+            "regionId": "r1",
+            "rowId": "row-1",
+            "fragmentIndex": 0,
+            "trainable": True,
+        },
+        {
+            "id": "l2",
+            "baseline": [[15, 50], [40, 50]],
+            "boundary": [],
+            "type": "DefaultLine",
+            "transcript": "piece",
+            "regionId": "r1",
+            "rowId": "row-1",
+            "fragmentIndex": 1,
+            "trainable": False,
+            "exclusionReason": "bisected edge glyph",
+        },
+    ]
+    gaps = [{
+        "id": "gap-1",
+        "rowId": "row-1",
+        "afterLineId": "l1",
+        "beforeLineId": "l2",
+        "type": "hole",
+        "polygon": [],
+        "confidence": None,
+    }]
+    manager.save_annotations_v2(session.session_id, regions, lines, gaps)
 
     fetched = manager.get_annotations_v2(session.session_id)
-    assert fetched == {"regions": regions, "lines": lines}
+    assert fetched == {"regions": regions, "lines": lines, "gaps": gaps}
 
     page_xml = manager.export_session(session.session_id, ExportFormat.PAGE)
     assert 'custom="structure {type:MainZone;}"' in page_xml
-    assert 'custom="structure {type:DefaultLine;}"' in page_xml
+    assert "structure {type:DefaultLine;} msocr {json:" in page_xml
     assert "<Unicode>test</Unicode>" in page_xml
+    restored = manager.parse_page_xml_to_v2(page_xml.encode("utf-8"))
+    assert restored is not None
+    assert restored["gaps"] == gaps
+    assert [
+        {
+            key: line.get(key)
+            for key in (
+                "id", "regionId", "rowId", "fragmentIndex", "trainable", "exclusionReason"
+            )
+        }
+        for line in restored["lines"]
+    ] == [
+        {
+            "id": "l1",
+            "regionId": "r1",
+            "rowId": "row-1",
+            "fragmentIndex": 0,
+            "trainable": True,
+            "exclusionReason": None,
+        },
+        {
+            "id": "l2",
+            "regionId": "r1",
+            "rowId": "row-1",
+            "fragmentIndex": 1,
+            "trainable": False,
+            "exclusionReason": "bisected edge glyph",
+        },
+    ]

@@ -44,6 +44,28 @@ def test_extract_lines_help_lists_all_flags():
         assert flag in out, f"missing {flag!r} in extract-lines help"
 
 
+def test_prepare_fragment_page_help_lists_safety_controls():
+    out = _help_flags("prepare-fragment-page")
+    for flag in [
+        "--output-dir", "--isolation-mode", "--propose-lines", "--segmentation-model",
+    ]:
+        assert flag in out, f"missing {flag!r} in prepare-fragment-page help"
+
+
+def test_evaluate_layout_help_lists_comparison_inputs():
+    out = _help_flags("evaluate-layout")
+    for flag in [
+        "--ground-truth", "--predictions", "--distance-tolerance", "--report",
+    ]:
+        assert flag in out, f"missing {flag!r} in evaluate-layout help"
+
+
+def test_download_e27_images_help_lists_all_flags():
+    out = _help_flags("download-e27-images")
+    for flag in ["--manifest", "--output-dir", "--verify-only", "--force"]:
+        assert flag in out, f"missing {flag!r} in download-e27-images help"
+
+
 def test_train_remote_requires_runpod_api_key(tmp_path, monkeypatch):
     """No RUNPOD_API_KEY -> ClickException before any pod call is made."""
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
@@ -82,5 +104,8 @@ def test_main_help_lists_new_subcommands():
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0, result.output
     out = result.output
-    for name in ["train-remote", "evaluate", "annotate", "extract-lines"]:
+    for name in [
+        "train-remote", "evaluate", "annotate", "extract-lines",
+        "download-e27-images", "prepare-fragment-page", "evaluate-layout",
+    ]:
         assert name in out, f"missing {name!r} in top-level help"

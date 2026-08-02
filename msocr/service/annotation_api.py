@@ -20,6 +20,7 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 
 from msocr.data.session_manager import (
+    AnnotationValidationError,
     ExportFormat,
     IngestionPath,
     LANGUAGE_REGISTRY,
@@ -337,7 +338,9 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
         }
 
     @app.get("/api/sessions/{session_id}/export")
-    def export_session(session_id: str, format: str = "alto") -> Response:
+    def export_session(
+        session_id: str, format: str = "alto", training: bool = False
+    ) -> Response:
         """Export session in specified format.
 
         Args:
@@ -358,18 +361,41 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
                 detail=f"Invalid format: {format}. Valid: alto, page, tsv",
             )
 
+        if training and export_format != ExportFormat.PAGE:
+            raise HTTPException(
+                status_code=400, detail="training export is available only for PAGE XML"
+            )
+
         content = manager.export_session(session_id, export_format)
         if content is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+        session_dir = manager._get_session_dir(session_id)
+        if training:
+            from msocr.training.page_export import compile_training_page_xml
+
+            full_path = session_dir / f"{session_id}-annotations.xml"
+            training_path = session_dir / f"{session_id}-training.xml"
+            full_path.write_text(content, encoding="utf-8")
+            try:
+                compile_training_page_xml(
+                    full_path,
+                    training_path,
+                    audit_path=session_dir / f"{session_id}-training-audit.json",
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            content = training_path.read_text(encoding="utf-8")
 
         # ponytail: also persist the export into the session dir so it lives on
         # disk in a known place for Kraken training, not just in the browser
         # Downloads folder. Best-effort — a write failure shouldn't break the
         # download.
         ext = "tsv" if format.lower() == "tsv" else "xml"
-        fname = f"{session_id}.{ext}"
+        suffix = "-training" if training else ""
+        fname = f"{session_id}{suffix}.{ext}"
         try:
-            out_path = manager._get_session_dir(session_id) / fname
+            out_path = session_dir / fname
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(content, encoding="utf-8")
         except Exception as exc:  # noqa: BLE001
@@ -510,12 +536,12 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
         session = manager.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        state = session.annotations_v2 or {"regions": [], "lines": []}
+        state = session.annotations_v2 or {"regions": [], "lines": [], "gaps": []}
         return {"has_annotations": bool(session.annotations_v2), **state}
 
     @app.post("/api/sessions/{session_id}/annotations")
     async def save_annotations_v2(session_id: str, request: Request) -> Dict[str, Any]:
-        """Store v2 drawing-UI annotation state (regions + lines).
+        """Store v2 drawing-UI annotation state (regions, lines, and gaps).
 
         Replaces any prior v2 state. Body shape:
         {"regions": [{"id","polygon","type"}], "lines": [{"id","baseline","type","transcript"}]}
@@ -526,7 +552,11 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
         body = await request.json()
         regions = body.get("regions", []) or []
         lines = body.get("lines", []) or []
-        updated = manager.save_annotations_v2(session_id, regions, lines)
+        gaps = body.get("gaps", []) or []
+        try:
+            updated = manager.save_annotations_v2(session_id, regions, lines, gaps)
+        except AnnotationValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if updated is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
         return {"status": "ok"}
@@ -648,7 +678,10 @@ def create_app(base_dir: Optional[Path] = None, crop_manuscript_area: bool = Tru
             updated_lines.append(new_ln)
 
         updated_session = manager.save_annotations_v2(
-            session_id, v2.get("regions", []) or [], updated_lines
+            session_id,
+            v2.get("regions", []) or [],
+            updated_lines,
+            v2.get("gaps", []) or [],
         )
         if updated_session is None:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")

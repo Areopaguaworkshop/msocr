@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 import pytest
 
 from msocr.data.session_manager import (
+    AnnotationValidationError,
     AnnotationSession,
     ExportFormat,
     IngestionPath,
@@ -123,6 +124,49 @@ def test_line_crops_apply_manuscript_area_offset(session_manager: SessionManager
     crop_path = session_manager._get_session_dir(session.session_id) / lines[0].image_crop_path
     with Image.open(crop_path) as crop:
         assert crop.convert("L").getextrema()[0] < 80
+
+
+def test_fragment_metadata_rejects_duplicate_rtl_indexes(session_manager: SessionManager):
+    session = session_manager.create_session(
+        language="sogdian",
+        script_variant="standard",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="page.tif",
+    )
+    lines = [
+        {"id": "a", "rowId": "row-1", "fragmentIndex": 0},
+        {"id": "b", "rowId": "row-1", "fragmentIndex": 0},
+    ]
+
+    with pytest.raises(AnnotationValidationError, match="duplicate fragmentIndex"):
+        session_manager.save_annotations_v2(session.session_id, [], lines, [])
+
+
+def test_page_export_keeps_v2_lines_when_regions_are_optional(session_manager: SessionManager):
+    session = session_manager.create_session(
+        language="sogdian",
+        script_variant="standard",
+        ingestion_path=IngestionPath.LOCAL_FILE,
+        source="fragment.png",
+    )
+    session_manager.save_annotations_v2(
+        session.session_id,
+        [],
+        [{
+            "id": "line-1",
+            "baseline": [[80, 20], [10, 20]],
+            "boundary": [],
+            "type": "DefaultLine",
+            "transcript": "test",
+        }],
+        [],
+    )
+
+    page_xml = session_manager.export_session(session.session_id, ExportFormat.PAGE)
+
+    assert 'id="region_0"' in page_xml
+    assert 'id="line-1"' in page_xml
+    assert "<Unicode>test</Unicode>" in page_xml
 
 
 def test_save_page_image_from_local_file(session_manager: SessionManager, tmp_path: Path):

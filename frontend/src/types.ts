@@ -33,11 +33,28 @@ export interface Line {
   // null/missing or stale ref = orphan line (rendered with yellow dashed
   // outline + ⚠ badge). Existing session JSON without this field still loads.
   regionId?: string | null;
+  // A logical row may contain several physically disconnected, independently
+  // trainable line fragments. Index 0 is first in RTL reading order.
+  rowId?: string | null;
+  fragmentIndex?: number | null;
+  trainable?: boolean;
+  exclusionReason?: string | null;
+}
+
+export interface Gap {
+  id: string;
+  rowId: string;
+  afterLineId: string;
+  beforeLineId: string;
+  type: "hole" | "tear" | "lost";
+  polygon: Point[];
+  confidence: number | null;
 }
 
 export interface AnnotationState {
   regions: Region[];
   lines: Line[];
+  gaps: Gap[];
 }
 
 export interface SessionSummary {
