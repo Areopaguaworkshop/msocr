@@ -3,7 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/downloads/)
 
-`msocr` is now a focused Sogdian manuscript HTR toolkit. It uses Kraken for local handwritten text recognition, keeps language handling Sogdian-only, and provides small tools for ground-truth preparation, model training (local or remote on RunPod GPU Cloud Pods), inference, an API, a browser-based annotation UI, and a Gradio demo.
+`msocr` is a focused Sogdian manuscript HTR toolkit. It uses Kraken for local handwritten text recognition, keeps language handling Sogdian-only, and provides small tools for ground-truth preparation, model training (local or remote on RunPod GPU Cloud Pods), inference, an API, and a React annotation UI.
 
 Active scope (remote training): RunPod GPU Cloud Pod submission for `ketos train` fine-tuning via `msocr train-remote`, with a minimal procedural per-style-group orchestrator (one style-group at a time, not a DAG engine).
 
@@ -108,12 +108,12 @@ See `docs/kraken-178-lines-feasibility.md` for the feasibility research that pre
 
 Active work has shifted toward **Christian Sogdian** manuscripts (Sogdian language written in the East Syriac script, Unicode block `U+0710`) sourced from the Sims-Williams 1985 C2AV Berlin plates. Recent changes:
 
-- **Christian Sogdian manifests** under `data/manifests/`: `christian-sogdian-c2av.json` (canonical, growing plate set) plus two single-page smoke manifests (`e57d259b-smoke.json`, `christian-sogdian-c2av-image19-smoke.json`). Style group `christian-syriac-script-c2av` targets fine-tuning from a Syriac base model (`models/kraken/sophro_mhiro_syriac.mlmodel`).
+- **Christian Sogdian manifests** under `data/manifests/`: `c2av-finetune.json` is the active 10/1/1 split, `lopo/` contains leave-one-plate-out variants, and the `*-smoke.json` manifests only exercise the pipeline. Style group `c2av-syriac-finetune` targets the Syriac base model at `models/kraken/sophro_mhiro_syriac.safetensors`.
 - **Fragment-handling CLI pipeline** for damaged/fragmentary manuscripts: `msocr isolate-fragments` (Sauvola + connected components + DBSCAN), `binarize-fragments` (per-fragment Sauvola/NLbin with bleed-through detection), `deskew-fragments` (Hough deskew on binary masks), and `extract-lines` (exact-count row-band cropping with optional ROI / row-centers). See `docs/kraken-fragmentary-manuscripts.md`.
 - **Annotation UI rewrite**: the browser UI moved from HTMX/Alpine to a React SPA (OpenSeadragon viewer + Phosphor icons, Sogdian Latin-transliteration palette). The SPA bundle lives in `frontend/dist/` and is served by the annotation API. Build it with `cd frontend && npm install && npm run build`. `msocr annotate`, `annotation-api`, and `demo` all refuse to start if `frontend/dist/index.html` is missing.
 - **Annotation UI Tier 1 (eScriptorium-parity)**: per-point baseline vertex delete (Ctrl+Del), reading-direction invert (I), join lines (J), explicit line↔region link/unlink (Y/U) with orphan-line indicator, reading-order auto-sort (Shift+L) with order badges, `?` help cheatsheet, plain-text side panel (Ctrl+5), and line-type dropdown. `tsc` + `vite build` pass. See `docs/fix-a-v9-annotation-plan.md` §Tier 1 for the full list and the deliberate simplifications (`ponytail:` comments in `AnnotateEditor.tsx`).
 - **`msocr demo`** now launches the annotation API + React SPA on port 8001 (default). The legacy Gradio demo is dead code; `--share` is a silent no-op.
-- **`--no-crop-manuscript-area`** flag on `annotate`, `annotation-api`, and `demo` disables automatic manuscript-area cropping before line segmentation.
+- **`--no-crop-manuscript-area`** on `annotate` and `annotation-api` disables automatic manuscript-area cropping before line segmentation.
 - **RunPod runner hardened**: discovers the public SSH host:port from `runtime.ports` (RunPod exposes SSH on a random public port), relies on account-level SSH key injection (no per-pod env var), reduced default pod disk to 50 GB.
 - **Orchestrator polygon enrichment**: kraken 7.x requires `<Coords>` per `<TextLine>`, but the annotation exporter only emits `<Baseline>`. The orchestrator now computes polygonal `<Coords>` via `calculate_polygonal_environment` before upload, and applies an idempotent in-process patch for a kraken 7.0.2 checkpoint-save crash (`self.net is None`).
 - **Evaluation harness**: parses kraken 7.0.2's percentage-format Character/Word Accuracy output (in addition to legacy `CER:`/`WER:` labels) and enriches baseline-only holdout XMLs into temp polygon XMLs before `ketos test`.
@@ -136,6 +136,45 @@ uv sync
 ```
 
 The project targets Python 3.12 via `.python-version`.
+
+## Workflow
+
+```text
+Manuscript image/PDF
+        |
+        +--> annotate/demo --> React UI + annotation API
+        |                         |
+        |                         +--> PAGE/ALTO XML or TSV ground truth
+        |                                      |
+        |                                      +--> frozen split manifest
+        |                                               |
+        |                         +---------------------+--------------------+
+        |                         |                                          |
+        |                   msocr train                              msocr train-remote
+        |                 local ketos train                     enrich polygons + RunPod
+        |                         |                                          |
+        |                         +---------------------+--------------------+
+        |                                               |
+        |                                      Kraken .safetensors
+        |                                               |
+        |                                      msocr evaluate
+        |                                      holdout CER/WER
+        |
+        +--> msocr htr / POST /htr
+                 |
+          NLbin + manuscript crop
+                 |
+          RTL baseline segmentation
+                 |
+          Kraken recognition
+                 |
+          JSON or Markdown
+```
+
+- **Ground truth:** `annotate`, `annotation-api`, and `demo` serve the same React SPA. Sessions can export PAGE XML, ALTO XML, or TSV.
+- **Local training:** `train` compiles PAGE/ALTO XML to Arrow and invokes Kraken `ketos train`.
+- **Remote training:** `train-remote` processes one manifest style group, enriches PAGE baselines with polygons, uploads train/validation data to RunPod, downloads the best `.safetensors` checkpoint, then evaluates the holdout locally.
+- **Runtime:** `htr`, the API, and `runtime-smoke-check` share the same model resolver. The standalone `preprocess` command is optional and is not run automatically by HTR.
 
 ## Quick Start
 
@@ -171,7 +210,7 @@ You can also train from a frozen split manifest:
 
 ```bash
 uv run msocr train \
-  --split-manifest-id data/manifests/sogdian-htr-v1.json \
+  --split-manifest-id data/manifests/c2av-finetune.json \
   --split-partition train
 ```
 
@@ -291,26 +330,26 @@ It does not auto-open a browser (flaky in headless/Docker/SSH) — click the pri
 ```bash
 export RUNPOD_API_KEY=...
 uv run msocr train-remote \
-  --manifest data/manifests/berlin-turfan-sogdian-v1.json \
-  --style-group manichaean-early \
-  --base-model models/kraken/openiti-arabic-base.safetensors \
-  --output-model models/kraken/sogdian-manichaean-early.mlmodel \
+  --manifest data/manifests/c2av-finetune.json \
+  --style-group c2av-syriac-finetune \
+  --base-model models/kraken/sophro_mhiro_syriac.safetensors \
+  --output-model models/kraken/c2av_finetune.safetensors \
   --reports-dir reports/ \
-  --pod-gpu "RTX 4090" \
-  --pod-image msocr-kraken7:latest \
+  --pod-gpu "NVIDIA GeForce RTX 3090" \
   --ssh-key ~/.ssh/id_ed25519 \
-  --epochs 50 --min-epochs 20 --lag 10 --freeze-backbone 5000 --augment
+  --epochs 60 --min-epochs 8 --lag 10 \
+  --freeze-backbone 999999 --warmup 200 --lr 1e-4 --augment
 ```
 
-See `docs/runpod.md` for the full runbook (API key, SSH key, pod image build/push, manual recovery, cost).
+`--base-model` is optional when the style group has `base_model_override`; explicit CLI input wins. See `docs/runpod.md` for RunPod credentials and recovery notes.
 
 ### Evaluate a trained model
 
 ```bash
 uv run msocr evaluate \
-  --manifest data/manifests/berlin-turfan-sogdian-v1.json \
-  --style-group manichaean-early \
-  --model models/kraken/sogdian-manichaean-early.mlmodel \
+  --manifest data/manifests/c2av-finetune.json \
+  --style-group c2av-syriac-finetune \
+  --model models/kraken/c2av_finetune.safetensors \
   --reports-dir reports/
 ```
 
@@ -327,7 +366,7 @@ uv run msocr htr [OPTIONS] INPUT_PATH
 Key options:
 
 - `--lang sogdian|old_sogdian` (default: `sogdian`)
-- `--model PATH` optional Kraken `.mlmodel` override
+- `--model PATH` optional Kraken `.mlmodel` or `.safetensors` override
 - `--variant TEXT` metadata label, default `standard`
 - `--output-format json|markdown`
 - `--output PATH`
@@ -347,7 +386,7 @@ Training uses `ketos compile` followed by `ketos train`. The default config is `
 uv run msocr train-remote --manifest PATH --style-group ID --base-model PATH --output-model PATH
 ```
 
-Trains one style-group on a RunPod GPU Cloud Pod, then evaluates locally. Reads `RUNPOD_API_KEY` from env. Key options: `--pod-gpu` (default `RTX 4090`), `--pod-image` (default `msocr-kraken7:latest`), `--ssh-key` (default `~/.ssh/id_ed25519`), `--epochs` (50), `--min-epochs` (20), `--lag` (10), `--freeze-backbone` (5000), `--augment/--no-augment`, `--device` (`cuda:0`), `--workers` (8). See `docs/runpod.md`.
+Trains one style group on a RunPod GPU Cloud Pod, downloads the best `.safetensors` checkpoint, then evaluates locally. Reads `RUNPOD_API_KEY` from the environment. Defaults are smoke-oriented: RTX 3090, the official RunPod PyTorch image, 2 epochs, 0 minimum epochs, no augmentation, device `auto`, and 8 workers. Set production hyperparameters explicitly; use `--freeze-old-rows` only with a generated union-codec JSON.
 
 ### `evaluate`
 
@@ -439,20 +478,28 @@ Frozen manifests live under `data/manifests/` by convention and use manuscript-i
 
 ```json
 {
-  "manifest_id": "berlin-turfan-sogdian-v1",
+  "manifest_id": "c2av-finetune",
   "language": "sogdian",
   "writing_mode": "handwritten",
-  "script_block": "U+10F30",
-  "base_dir": "data/berlin_turfan/sogdian",
+  "script_block": "U+0710",
+  "script_variant": "christian-syriac-script",
+  "base_dir": "dataset/christian_sogdian_c2av",
   "partitions": {
     "train": [
-      {"id": "line_0001", "xml_path": "ms001/line_0001.xml", "manuscript_id": "ms001", "image": "ms001/line_0001.tif"}
+      {"id": "c2av01-train", "manuscript_id": "c2av01", "xml_path": "gt/c2av01_page_01.xml"}
     ],
-    "validation": [],
-    "holdout": []
+    "validation": [
+      {"id": "c2av11-val", "manuscript_id": "c2av11", "xml_path": "gt/c2av11_page_11.xml"}
+    ],
+    "holdout": [
+      {"id": "c2av12-holdout", "manuscript_id": "c2av12", "xml_path": "gt/c2av12_page_12.xml"}
+    ]
   },
   "style_groups": {
-    "manichaean-early": {"manuscript_ids": ["ms001", "ms002"], "base_model_override": "openiti-arabic-base"}
+    "c2av-syriac-finetune": {
+      "manuscript_ids": ["c2av01", "c2av02", "c2av03", "c2av04", "c2av05", "c2av06", "c2av07", "c2av08", "c2av09", "c2av10", "c2av11", "c2av12"],
+      "base_model_override": "models/kraken/sophro_mhiro_syriac.safetensors"
+    }
   }
 }
 ```
@@ -496,12 +543,14 @@ frontend/                       # React + OpenSeadragon annotation SPA
 ├── src/{AnnotateEditor,PlateGallery,SessionList,App,types}.tsx
 └── dist/                      # build output, served by annotation-api
 data/manifests/
-├── berlin-turfan-sogdian-v1.json         # schema-only
-├── christian-sogdian-c2av.json           # canonical Christian Sogdian manifest
-├── christian-sogdian-c2av-image19-smoke.json
-└── e57d259b-smoke.json
+├── c2av-finetune.json                    # active 10/1/1 train/validation/holdout split
+├── c2av-{smoke,eval-train,eval-val}.json
+├── christian-sogdian-c2av*.json
+├── e57d259b-smoke.json
+├── ms-jer-36-adapt.json
+└── lopo/                                 # 12 leave-one-plate-out manifests
 docs/
-├── runpod.md                              # RunPod runbook
+├── runpod.md                              # RunPod credentials and recovery
 ├── kraken-fragmentary-manuscripts.md      # fragment pipeline rationale
 ├── kraken-training-data-research.md
 ├── multi-script-htr-research.md
@@ -512,10 +561,10 @@ docs/
 
 Remote training artifacts:
 
-- `Dockerfile.train` — RunPod pod image (python:3.12-slim + uv + kraken 7.0)
-- `docs/runpod.md` — runbook for `msocr train-remote`
-- `data/manifests/berlin-turfan-{sogdian,syriac}-v1.json` — schema-only manifests (contents filled during data collection)
-- `data/manifests/christian-sogdian-c2av*.json` — Christian Sogdian (East Syriac script) manifests, real and smoke variants
+- `Dockerfile.train` — optional custom RunPod image
+- `docs/runpod.md` — credentials and manual recovery notes
+- `data/manifests/c2av-finetune.json` — active Christian Sogdian fine-tune split
+- `data/manifests/lopo/` — leave-one-plate-out split variants; run one manifest/style group at a time
 
 ## Tests
 
@@ -529,6 +578,8 @@ Targeted examples:
 uv run pytest tests/service/test_runtime.py tests/service/test_deploy.py
 uv run pytest tests/data/test_manifest.py tests/data/test_session_manager.py
 ```
+
+The only GitHub Actions workflow currently runs PR Agent review automation; it does not run the test suite. Run tests locally before merging.
 
 ## Notes
 
