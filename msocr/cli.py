@@ -927,6 +927,74 @@ def evaluate(manifest, style_group, model, reports_dir) -> None:
     click.echo(f"Evaluation report: {report_path}")
 
 
+@main.command(name="evaluate-segmenter")
+@click.option("--heldout-json", required=True,
+              type=click.Path(path_type=Path, exists=True),
+              help="JSON listing held-out plates: [{\"id\":..., \"image\":..., \"gt_xml\":...}]")
+@click.option("--backend", type=click.Choice(["blla", "kraken", "yolo-obb"]),
+              default="blla", show_default=True,
+              help="Segmenter backend: blla=stock Kraken (zero-shot floor), "
+                   "kraken=any Kraken-plugin seg model (orli/D-FINE/fine-tuned blla) "
+                   "via --model, yolo-obb=Ultralytics YOLO-OBB via --model")
+@click.option("--model", type=click.Path(path_type=Path),
+              help="Segmenter model path. Omit for stock blla. Required for yolo-obb.")
+@click.option("--recognizer", type=click.Path(path_type=Path),
+              help="Optional Kraken recognition .safetensors for end-to-end CER (metric 6)")
+@click.option("--distance-tolerance", default=15.0, show_default=True, type=float,
+              help="Baseline matching tolerance in pixels")
+@click.option("--reports-dir", default="reports/", show_default=True,
+              type=click.Path(path_type=Path), help="Directory for evaluation reports")
+@click.option("--label", default=None,
+              help="Report label (default: backend name or model stem)")
+def evaluate_segmenter_command(heldout_json, backend, model, recognizer,
+                               distance_tolerance, reports_dir, label) -> None:
+    """Evaluate a line-level segmenter on a frozen held-out fragment set (Phase 2).
+
+    Produces reports/{label}__segmenter.json with layout metrics (precision,
+    recall, F1, split/merge counts, row grouping, gap localization, reading
+    order) and optional end-to-end CER when --recognizer is provided.
+
+    The held-out set is a JSON file you curate once and freeze: a list of
+    plates never used in any training split. See
+    docs/2026-08-10-fragment-segmentation-model-plan-v1.md Phase 2.
+    """
+    from msocr.evaluation.segmenter_harness import (
+        evaluate_segmenter, make_kraken_predict_fn, make_yolo_predict_fn,
+    )
+
+    heldout = json.loads(heldout_json.read_text(encoding="utf-8"))
+    if not heldout:
+        raise click.ClickException("Held-out set is empty")
+    label = label or (Path(model).stem if model else backend)
+
+    if backend == "yolo-obb":
+        if not model:
+            raise click.ClickException("--model is required for --backend yolo-obb")
+        predict_fn = make_yolo_predict_fn(str(model))
+    else:  # blla or kraken
+        predict_fn = make_kraken_predict_fn(str(model) if model else None)
+
+    try:
+        report = evaluate_segmenter(
+            heldout=heldout,
+            predict_fn=predict_fn,
+            recognizer_model_path=str(recognizer) if recognizer else None,
+            distance_tolerance=distance_tolerance,
+            reports_dir=str(reports_dir),
+            label=label,
+        )
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    agg = report.get("aggregate", {})
+    click.echo(f"Segmenter: {label}  plates={report['plates_evaluated']}")
+    click.echo(f"  baseline F1={agg.get('baseline_f1', '—')}  "
+               f"split={agg.get('split_count', '—')}  merge={agg.get('merge_count', '—')}")
+    if "end_to_end_cer" in agg:
+        click.echo(f"  end-to-end CER={agg['end_to_end_cer']:.4f}")
+    click.echo(f"  report: {Path(reports_dir) / f'{label}__segmenter.json'}")
+
+
 @main.command(name="dump-preds")
 @click.option("--model", required=True, type=click.Path(path_type=Path),
               help="Path to the .safetensors or .mlmodel recognition model")

@@ -325,6 +325,124 @@ uv run msocr annotate --host 127.0.0.1 --port 8001 --base-dir msocr/data
 
 It does not auto-open a browser (flaky in headless/Docker/SSH) — click the printed URL.
 
+#### How to annotate a fragment (step by step)
+
+The annotation editor produces **PAGE XML** — one annotation session that
+trains both the Kraken recognizer (`ketos train`) and a future learned
+segmenter (orli / YOLO-OBB / D-FINE). See
+`docs/2026-08-10-fragment-segmentation-model-plan-v1.md` for the two-model
+pipeline this annotation feeds.
+
+**Step 0 — Preprocess the plate first (outside the browser).** The editor
+expects an isolated, deskewed fragment image, not a raw publication plate:
+
+```bash
+uv run msocr isolate-fragments plate.png --output-dir tmp/p1/
+uv run msocr binarize-fragments plate.png \
+  --fragments-json tmp/p1/fragments.json --output-dir tmp/p2/
+uv run msocr deskew-fragments plate.png \
+  --fragments-json tmp/p1/fragments.json \
+  --binarized-dir tmp/p2/ --output-dir tmp/p3/
+# → deskewed fragment at tmp/p3/frag_001_deskewed.png
+```
+
+Optional line-count hint to guide your eye (classical CV, not a model):
+
+```bash
+uv run msocr extract-lines tmp/p3/frag_001_deskewed.png \
+  --expected-lines 18 --output-dir tmp/lines/
+# → line crops + overlay.jpg
+```
+
+**Step 1 — Create a session.** In the browser at
+`http://127.0.0.1:8001`:
+
+- **Language**: `sogdian`
+- **Script variant**: `christian-syriac-script`
+- **Fragment path**: absolute path to the deskewed fragment PNG (e.g.
+  `/home/you/project/msocr/tmp/p3/frag_001_deskewed.png`)
+- Submit → redirected to `/ui/{session_id}`
+
+Fragmented-manuscript sessions start with **no baselines**. Default Kraken
+BLLA failed the E27 pilot (zero usable line crops), so it does not
+auto-suggest lines. Draw them manually.
+
+**Step 2 — Draw regions (press `R`, optional but recommended).** Pick a
+region type from the palette, click points around the area, double-click to
+close. Region types:
+
+| Label | When to use |
+|---|---|
+| Main | The primary text column |
+| MainText | Marginal notes, glosses, commentary |
+| Numbering | Folio / page / quire numbers |
+| Damage | Physically damaged or unreadable area (Kraken will not read it) |
+| Graphic | Illustrations, decorations, ornaments |
+| DigitizationArtefact | Scan bleed-through, shadows, ruler marks |
+| Custom | Anything that does not fit the above |
+
+**Step 3 — Draw baselines (press `B`, the critical step).** A baseline is
+the reading line under the text — Kraken reads upward from it.
+
+1. Press `B`
+2. Pick a line type (usually `Default`; `Heading` for rubrics;
+   `Interlinear` for squeezed lines)
+3. Click the **start** of the line — for RTL Sogdian this is the visual
+   **right** end
+4. Click the **end** of the line — visual left end
+5. The baseline is created and selected
+
+Two clicks per line. Repeat for every visible line fragment on the plate.
+
+**Step 4 — Transcribe (press `T`).**
+
+1. Press `T`
+2. Click a baseline → the viewer centers on it, right panel activates
+3. Type the Sogdian text, right-to-left
+4. Use the character palette below the textarea (U+10F30–U+10F44) if you
+   do not have a Sogdian keyboard
+5. Press `Enter` to save + jump to next line (auto-saves on 2 s debounce)
+
+The right panel shows all lines in reading order. Drag the `⠿` handle to
+reorder. Reading order = top-to-bottom for Sogdian manuscript columns.
+
+**Step 5 — Export PAGE XML.** Click **PAGE XML** in the top bar. The
+browser downloads a `.page.xml` file containing one `<TextRegion>` per
+region and one `<TextLine>` per baseline with `<Baseline>`, `<Coords>`,
+and `<TextEquiv><Unicode>…</Unicode></TextEquiv>` carrying your
+transcription. This is the file that trains both models.
+
+#### Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `V` | Navigate mode (pan/zoom) |
+| `R` | Region mode |
+| `B` | Baseline mode |
+| `T` | Transcribe mode |
+| `Enter` (textarea) | Save + next line |
+| `Ctrl+↑` / `Ctrl+↓` | Previous / next line |
+| `Esc` | Cancel current drawing |
+| `Del` / `Backspace` | Delete selected region or line |
+| `Ctrl+S` | Save now |
+| `?` (top bar) | Open the in-editor guide |
+
+#### Critical rules for fragmented C2 manuscripts
+
+1. **Do not join across holes.** Draw each contiguous visible piece as a
+   separate baseline. A row interrupted by a lacuna = two baselines, linked
+   by `row_id` metadata (see `docs/2026-08-02-christian-sogdian-fragment-htr-plan-v1.md` §1).
+2. **Draw baselines under the text, not through it.** Kraken reads upward
+   from the baseline.
+3. **Transcribe what you see, not what you expect.** Damaged characters get
+   a `` placeholder — do not guess.
+4. **One session per page.** PAGE XML export is per-page.
+5. **Reading order = line order in the right panel.** Drag to reorder
+   before exporting.
+
+See `docs/ANNOTATION.md` for the full in-editor guide with screenshots and
+troubleshooting.
+
 ### Train a style-group on a RunPod GPU Cloud Pod
 
 ```bash
@@ -395,6 +513,16 @@ uv run msocr evaluate --manifest PATH --style-group ID --model PATH --reports-di
 ```
 
 Runs `ketos test` over a style-group's holdout partition, writes JSON + Markdown benchmark report. Thin wrapper — no invented metrics, reuses what `ketos test` reports.
+
+### `evaluate-segmenter`
+
+```bash
+uv run msocr evaluate-segmenter --heldout-json PATH [--backend blla|kraken|yolo-obb] [--model PATH] [--recognizer PATH] [--reports-dir DIR] [--label TEXT]
+```
+
+Evaluates a line-level segmenter on a frozen held-out fragment set (Phase 2 of the fragment-segmentation plan). Produces `reports/{label}__segmenter.json` with baseline precision/recall/F1, split/merge counts, row grouping, gap localization, reading order, and optional end-to-end CER when `--recognizer` is provided.
+
+`--heldout-json` is a JSON list of `{"id", "image", "gt_xml"}` entries you curate once and freeze — plates never used in any training split. `--backend blla` (default) loads the stock Kraken BLLA model as the zero-shot floor to beat; `--backend kraken --model path/to/seg.safetensors` loads any Kraken-plugin segmenter (orli / D-FINE / fine-tuned BLLA); `--backend yolo-obb --model best.pt` loads an Ultralytics YOLO-OBB model. See `docs/2026-08-10-fragment-segmentation-model-plan-v1.md` Phase 2.
 
 ### `demo`
 
@@ -518,7 +646,9 @@ msocr/
 ├── datasets/splitter.py
 ├── evaluation/
 │   ├── metrics.py
-│   └── harness.py
+│   ├── harness.py
+│   ├── layout_metrics.py      # baseline/row/gap metrics (evaluate-layout)
+│   └── segmenter_harness.py   # model-neutral segmenter eval (evaluate-segmenter)
 ├── language_registry.py
 ├── models/inference.py
 ├── output/formats.py
