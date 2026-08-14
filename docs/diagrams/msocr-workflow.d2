@@ -1,0 +1,77 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 200
+    pad: 24
+  }
+}
+
+direction: right
+
+sources: {
+  label: "Manuscript sources"
+  shape: cloud
+  style.fill: "#E0F2FE"
+  upload: "Upload / local file"
+  iiif: "IIIF manifest"
+}
+
+preprocess: {
+  label: "1 · Page preparation"
+  style.fill: "#DBEAFE"
+  isolate: "Isolate fragment"
+  enhance: "Enhance · binarise · deskew"
+  isolate -> enhance
+}
+
+annotation: {
+  label: "2 · Human ground truth"
+  style.fill: "#CCFBF1"
+  ui: "Browser annotation\nRTL baseline · polygon · transcript"
+  pagexml: "PAGE XML\nrow / gap metadata"
+  ui -> pagexml
+}
+
+training: {
+  label: "3 · Model improvement"
+  style.fill: "#EDE9FE"
+  ketos: "Kraken ketos fine-tuning\nlocal or RunPod GPU"
+  evaluate: "CER / WER\nconfusion-matrix diagnosis"
+  model: "Validated local\nKraken model"
+  ketos -> evaluate -> model
+}
+
+runtime: {
+  label: "4 · Recognition delivery"
+  style.fill: "#DCFCE7"
+  segment: "Line segmentation\nBLLA · row bands · manual review"
+  htr: "Kraken HTR\nRTL line recognition"
+  output: "JSON / Markdown"
+  segment -> htr -> output
+}
+
+experimental: {
+  label: "Development-only experiment"
+  style: {
+    fill: "#F3E8FF"
+    stroke: "#7E22CE"
+    stroke-dash: 4
+  }
+  mask: "Ink / substrate / damage mask"
+  review: "Palaeographic review\nof candidate regions"
+  mask -> review
+}
+
+sources.upload -> preprocess.isolate
+sources.iiif -> preprocess.isolate
+preprocess.enhance -> annotation.ui
+annotation.pagexml -> training.ketos
+training.model -> runtime.htr
+preprocess.enhance -> runtime.segment
+training.evaluate -> annotation.ui: "more approved ground truth"
+preprocess.enhance -> experimental.mask: "optional"
+experimental.review -> annotation.ui: "approved suggestions"
+
+experimental.mask -> runtime.segment: "only after evaluation" {
+  style.stroke-dash: 4
+}
