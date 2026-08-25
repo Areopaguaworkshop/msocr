@@ -137,8 +137,29 @@ models/runtime/
 # Large dataset files
 dataset/
 
+# Image files (manuscript pages, crops, scans)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tif
+*.tiff
+*.webp
+*.heic
+*.heif
+*.raw
+*.psd
+*.ai
+*.eps
+*.svg
+*.ico
+
 # Test runtime folder (benchmarks, references)
 test/
+
+# Temporary preprocessing / working artifacts
+tmp/
 
 # Root-level test PDFs
 /*.pdf
