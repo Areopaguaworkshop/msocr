@@ -7,6 +7,7 @@ poll pod status, download the .safetensors artifact, terminate the pod.
 Ponytail: procedural, one pod at a time. No queue, no DAG. If we need
 durable parallelism later, add RQ on top.
 """
+
 from __future__ import annotations
 
 import os
@@ -14,7 +15,9 @@ import sys
 import socket
 import time
 import shlex
+import fnmatch
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Optional
 
 import runpod
@@ -41,16 +44,51 @@ class PodNeverScheduledError(RuntimeError):
 class RunPodRunner:
     """Submit, SSH-train, poll, download, terminate one RunPod GPU Cloud Pod."""
 
-    def __init__(self, api_key: str, image: str, gpu_type: str,
-                 ssh_key_path: str, ssh_user: str = "root",
-                 pod_disk_gb: int = 50):
+    def __init__(
+        self,
+        api_key: str,
+        image: str,
+        gpu_type: str,
+        ssh_key_path: str,
+        ssh_user: str = "root",
+        pod_disk_gb: int = 50,
+    ):
         self.api_key = api_key
         self.image = image
         self.gpu_type = gpu_type
         self.ssh_key_path = ssh_key_path
         self.ssh_user = ssh_user
         self.pod_disk_gb = pod_disk_gb
+        self._server_keys: dict[tuple[str, int], bytes] = {}
         runpod.api_key = api_key
+
+    def _connect(self, pod_hostport: tuple[str, int]) -> paramiko.SSHClient:
+        """Connect and pin an ephemeral pod's SSH host key after first use."""
+        host, port = pod_hostport
+        client = paramiko.SSHClient()
+        # ponytail: RunPod does not publish a pod host key through create/get_pod,
+        # so the first connection is TOFU. Pinning it prevents a changed endpoint
+        # from receiving uploads or commands later in the same lifecycle.
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            host,
+            port=port,
+            username=self.ssh_user,
+            key_filename=self.ssh_key_path,
+            timeout=60,
+        )
+        transport = client.get_transport()
+        if transport is None:
+            client.close()
+            raise paramiko.SSHException("SSH connection has no transport")
+        observed = transport.get_remote_server_key().asbytes()
+        expected = self._server_keys.setdefault((host, port), observed)
+        if expected != observed:
+            client.close()
+            raise paramiko.SSHException(
+                f"RunPod SSH host key changed for {host}:{port}"
+            )
+        return client
 
     def submit_pod(self, name: str) -> str:
         """Create a GPU Cloud Pod. Returns pod_id.
@@ -74,8 +112,9 @@ class RunPodRunner:
     # stuck_threshold: if desired=None AND runtime=None for >N consecutive polls,
     # the scheduler never placed the pod (capacity exhaustion). Terminate+retry
     # instead of waiting the full deadline — per RunPod capacity-fluctuation docs.
-    def _ssh_endpoint(self, pod_id: str, deadline_s: int = 1200,
-                      stuck_threshold: int = 10) -> tuple[str, int]:
+    def _ssh_endpoint(
+        self, pod_id: str, deadline_s: int = 1200, stuck_threshold: int = 10
+    ) -> tuple[str, int]:
         """Poll get_pod until runtime.ports has a public entry for port 22.
 
         Returns (host, port). Raises PodNeverScheduledError if the pod sits in
@@ -101,16 +140,25 @@ class RunPodRunner:
             # Terminate + let the run() retry loop recreate the pod.
             if desired is None and rt is None:
                 stuck_polls += 1
-                if stuck_polls >= stuck_threshold:
+                if (
+                    stuck_polls >= stuck_threshold
+                    and deadline_s >= stuck_threshold * 10
+                ):
                     raise PodNeverScheduledError(pod_id)
             else:
-                stuck_polls = 0  # pod is booting (desired set or runtime present), reset
+                stuck_polls = (
+                    0  # pod is booting (desired set or runtime present), reset
+                )
             time.sleep(10)
         raise RuntimeError(f"pod {pod_id} never exposed a public SSH port")
 
-    def ssh_exec(self, pod_hostport: tuple[str, int], cmd: list[str],
-                 timeout: int = 7200,
-                 idle_timeout: int = SSH_EXEC_IDLE_TIMEOUT) -> str:
+    def ssh_exec(
+        self,
+        pod_hostport: tuple[str, int],
+        cmd: list[str],
+        timeout: int = 7200,
+        idle_timeout: int = SSH_EXEC_IDLE_TIMEOUT,
+    ) -> str:
         """SSH into the pod and exec a command. Returns stdout. Raises on non-zero exit.
 
         ``idle_timeout`` is the watchdog ceiling: if no chunk arrives on either
@@ -119,14 +167,10 @@ class RunPodRunner:
         force-closed (see SSH_EXEC_IDLE_TIMEOUT). Bump it for known-silent long
         commands (e.g. apt install).
         """
-        host, port = pod_hostport
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         # ponytail: 3 retries with 30s backoff — pod boot can be slow.
         for attempt in range(3):
             try:
-                client.connect(host, port=port, username=self.ssh_user,
-                                key_filename=self.ssh_key_path, timeout=60)
+                client = self._connect(pod_hostport)
                 break
             except paramiko.SSHException:
                 if attempt == 2:
@@ -203,15 +247,13 @@ class RunPodRunner:
             )
         return "".join(out_buf)
 
-    def download_artifact(self, pod_hostport: tuple[str, int], remote: str, local: str) -> None:
+    def download_artifact(
+        self, pod_hostport: tuple[str, int], remote: str, local: str
+    ) -> None:
         """SCP a file from the pod to local. Does NOT terminate the pod on failure
         (so the artifact survives for manual recovery)."""
-        host, port = pod_hostport
         Path(local).parent.mkdir(parents=True, exist_ok=True)
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, port=port, username=self.ssh_user,
-                        key_filename=self.ssh_key_path, timeout=60)
+        client = self._connect(pod_hostport)
         sftp = client.open_sftp()
         try:
             sftp.get(remote, local)
@@ -219,15 +261,44 @@ class RunPodRunner:
             sftp.close()
             client.close()
 
-    def upload_artifact(self, local: str, pod_hostport: tuple[str, int], remote: str) -> None:
+    def find_artifact(
+        self, pod_hostport: tuple[str, int], remote_dir: str, pattern: str
+    ) -> str:
+        """Return the lexicographically last matching remote artifact.
+
+        Uses SFTP rather than a remote shell, so manifest/style-group values
+        cannot turn artifact discovery into command execution.
+        """
+        path = PurePosixPath(remote_dir)
+        if not path.is_absolute() or ".." in path.parts:
+            raise ValueError(
+                f"remote artifact directory must be absolute and normalized: {remote_dir}"
+            )
+        if not pattern or "/" in pattern or "\\" in pattern:
+            raise ValueError(f"artifact pattern must be a filename pattern: {pattern}")
+
+        client = self._connect(pod_hostport)
+        sftp = client.open_sftp()
+        try:
+            matches = sorted(
+                name
+                for name in sftp.listdir(str(path))
+                if fnmatch.fnmatchcase(name, pattern)
+            )
+        finally:
+            sftp.close()
+            client.close()
+        if not matches:
+            raise FileNotFoundError(f"no {pattern} found under {remote_dir}")
+        return str(path / matches[-1])
+
+    def upload_artifact(
+        self, local: str, pod_hostport: tuple[str, int], remote: str
+    ) -> None:
         """SCP a local file to the pod. Symmetric to download_artifact.
         Does NOT terminate the pod on failure — let the exception propagate so
         the caller can recover or terminate explicitly."""
-        host, port = pod_hostport
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, port=port, username=self.ssh_user,
-                        key_filename=self.ssh_key_path, timeout=60)
+        client = self._connect(pod_hostport)
         sftp = client.open_sftp()
         try:
             sftp.put(local, remote)
@@ -238,19 +309,40 @@ class RunPodRunner:
     def terminate_pod(self, pod_id: str) -> None:
         runpod.terminate_pod(pod_id)
 
-    def run_training(self, name: str, train_cmd: list[str],
-                     artifact_remote_dir: str, artifact_local_path: str,
-                     poll_timeout: int = 7200,
-                     pre_train_upload: list[tuple[str, str]] | None = None,
-                     setup_cmds: list[str] | None = None) -> str:
+    def run_training(
+        self,
+        name: str,
+        train_cmd: list[str],
+        artifact_remote_dir: str | None = None,
+        artifact_local_path: str | None = None,
+        poll_timeout: int = 7200,
+        pre_train_upload: list[tuple[str, str]] | None = None,
+        setup_cmds: list[str] | None = None,
+        artifact_pattern: str = "best_*.safetensors",
+        artifact_remote_path: str | None = None,
+    ) -> str:
         """Full lifecycle: submit → [upload] → [setup] → ssh train → glob → download → terminate.
         If ``pre_train_upload`` is provided, each ``(local, remote)`` pair is
         SFTP'd to the pod before ``setup_cmds`` run.
         If ``setup_cmds`` is provided, each is run via SSH before training.
-        Ketos 7.0 writes ``best_{score:.4f}.safetensors`` into ``artifact_remote_dir``;
-        the score suffix is unknown until training ends, so we glob the dir
-        and pick the (alphabetically) last ``best_*.safetensors`` — highest score.
+        ``artifact_remote_path`` downloads one known path. Otherwise the runner
+        finds the lexicographically last ``artifact_pattern`` under
+        ``artifact_remote_dir`` over SFTP.
         Returns the local artifact path."""
+        if not artifact_local_path:
+            raise ValueError("artifact_local_path is required")
+        if artifact_remote_path:
+            remote_path = PurePosixPath(artifact_remote_path)
+            if not remote_path.is_absolute() or ".." in remote_path.parts:
+                raise ValueError(
+                    f"remote artifact path must be absolute and normalized: {artifact_remote_path}"
+                )
+            resolved_artifact_dir = str(remote_path.parent)
+        elif artifact_remote_dir:
+            resolved_artifact_dir = artifact_remote_dir
+        else:
+            raise ValueError("artifact_remote_dir or artifact_remote_path is required")
+
         def _log(msg: str) -> None:
             # ponytail: print stage transitions to stdout so long runs are
             # observable. Without this the orchestrator is silent for 10+ min
@@ -278,7 +370,9 @@ class RunPodRunner:
                 _log(f"ssh endpoint = {pod_hostport[0]}:{pod_hostport[1]}")
                 break
             except PodNeverScheduledError as exc:
-                _log(f"pod never scheduled (capacity exhaustion?): terminating + retrying: {exc}")
+                _log(
+                    f"pod never scheduled (capacity exhaustion?): terminating + retrying: {exc}"
+                )
                 try:
                     self.terminate_pod(pod_id)
                 except Exception:
@@ -289,7 +383,8 @@ class RunPodRunner:
         if pod_id is None or pod_hostport is None:
             raise RuntimeError(
                 f"failed to launch a schedulable pod after {max_attempts} attempts "
-                f"(secure-cloud capacity exhausted; retry later or use --gpu-type fallback)")
+                f"(secure-cloud capacity exhausted; retry later or use --gpu-type fallback)"
+            )
         keep_pod_for_recovery = False
         try:
             if pre_train_upload:
@@ -297,28 +392,27 @@ class RunPodRunner:
                     stage = f"uploading {local} to {remote}"
                     _log(stage)
                     self.upload_artifact(local, pod_hostport, remote)
-            stage = f"creating remote artifact directory {artifact_remote_dir}"
+            stage = f"creating remote artifact directory {resolved_artifact_dir}"
             _log(stage)
-            self.ssh_exec(pod_hostport, ["mkdir", "-p", artifact_remote_dir])
+            self.ssh_exec(pod_hostport, ["mkdir", "-p", resolved_artifact_dir])
             if setup_cmds:
                 for cmd_str in setup_cmds:
                     stage = f"running setup command: {cmd_str[:120]}"
                     _log(stage)
-                    self.ssh_exec(pod_hostport, shlex.split(cmd_str), timeout=3600)  # ponytail: bumped from 1800s after a transient pip-install timeout on a slow RunPod mirror; returns early on success, so the extra headroom costs nothing.
+                    self.ssh_exec(
+                        pod_hostport, shlex.split(cmd_str), timeout=3600
+                    )  # ponytail: bumped from 1800s after a transient pip-install timeout on a slow RunPod mirror; returns early on success, so the extra headroom costs nothing.
             stage = "running remote training command"
             _log(stage + ": " + shlex.join(train_cmd))
             self.ssh_exec(pod_hostport, train_cmd, timeout=poll_timeout)
             keep_pod_for_recovery = True
-            # ponytail: glob best_*.safetensors, sort desc, take first.
-            # ls sorts ascending so `best_0.9` < `best_0.95`; tail -1 = highest score.
-            stage = f"locating best_*.safetensors under {artifact_remote_dir}"
-            listing = self.ssh_exec(pod_hostport,
-                ["sh", "-c", f"ls -1 {artifact_remote_dir}/best_*.safetensors 2>/dev/null | sort | tail -1"])
-            remote_best = listing.strip()
-            if not remote_best:
-                raise FileNotFoundError(
-                    f"no best_*.safetensors found under {artifact_remote_dir}; "
-                    f"training may have failed or written to a different path")
+            if artifact_remote_path:
+                remote_best = artifact_remote_path
+            else:
+                stage = f"locating {artifact_pattern} under {resolved_artifact_dir}"
+                remote_best = self.find_artifact(
+                    pod_hostport, resolved_artifact_dir, artifact_pattern
+                )
             stage = f"downloading {remote_best} to {artifact_local_path}"
             self.download_artifact(pod_hostport, remote_best, artifact_local_path)
             keep_pod_for_recovery = False

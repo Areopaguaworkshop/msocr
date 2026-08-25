@@ -1,8 +1,56 @@
 """Tests for msocr.training.runpod_runner. SDK and SSH are mocked."""
+
 from unittest.mock import patch, MagicMock, call
+
+import paramiko
 import pytest
 
 from msocr.training.runpod_runner import RunPodRunner
+
+
+def test_connect_rejects_changed_server_key(monkeypatch):
+    clients = [MagicMock(), MagicMock()]
+    for client, key in zip(clients, (b"first-key", b"changed-key")):
+        client.get_transport.return_value.get_remote_server_key.return_value.asbytes.return_value = (
+            key
+        )
+    monkeypatch.setattr(
+        "msocr.training.runpod_runner.paramiko.SSHClient",
+        MagicMock(side_effect=clients),
+    )
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/key"
+    )
+
+    runner._connect(("1.2.3.4", 17445))
+    with pytest.raises(paramiko.SSHException, match="host key changed"):
+        runner._connect(("1.2.3.4", 17445))
+
+    clients[1].close.assert_called_once()
+
+
+def test_find_artifact_uses_sftp_and_rejects_unsafe_paths():
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/key"
+    )
+    client = MagicMock()
+    client.open_sftp.return_value.listdir.return_value = [
+        "notes.txt",
+        "best_01.safetensors",
+        "best_02.safetensors",
+    ]
+    runner._connect = MagicMock(return_value=client)
+
+    assert (
+        runner.find_artifact(
+            ("1.2.3.4", 17445), "/workspace/models", "best_*.safetensors"
+        )
+        == "/workspace/models/best_02.safetensors"
+    )
+    with pytest.raises(ValueError, match="absolute and normalized"):
+        runner.find_artifact(("1.2.3.4", 17445), "../models", "best_*")
+    with pytest.raises(ValueError, match="filename pattern"):
+        runner.find_artifact(("1.2.3.4", 17445), "/workspace/models", "../best_*")
 
 
 def test_submit_pod_uses_runpod_create_pod_with_image_and_gpu(monkeypatch):
@@ -11,8 +59,12 @@ def test_submit_pod_uses_runpod_create_pod_with_image_and_gpu(monkeypatch):
     fake_runpod.create_pod.return_value = MagicMock(id="pod-123")
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
 
-    runner = RunPodRunner(api_key="fake", image="msocr-kraken7:latest",
-                          gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake",
+        image="msocr-kraken7:latest",
+        gpu_type="RTX 4090",
+        ssh_key_path="/tmp/id_ed25519",
+    )
     pod_id = runner.submit_pod(name="sogdian-train")
 
     fake_runpod.create_pod.assert_called_once()
@@ -30,15 +82,26 @@ def test_ssh_endpoint_polls_until_runtime_ports_has_public_22(monkeypatch):
     fake_runpod.get_pod.side_effect = [
         {"id": "p", "runtime": None},
         {"id": "p", "runtime": {"ports": []}},
-        {"id": "p", "runtime": {"ports": [
-            {"privatePort": 22, "isIpPublic": True, "ip": "1.2.3.4", "publicPort": 17445},
-        ]}},
+        {
+            "id": "p",
+            "runtime": {
+                "ports": [
+                    {
+                        "privatePort": 22,
+                        "isIpPublic": True,
+                        "ip": "1.2.3.4",
+                        "publicPort": 17445,
+                    },
+                ]
+            },
+        },
     ]
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
     monkeypatch.setattr("time.sleep", lambda *a: None)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     host, port = runner._ssh_endpoint("p", deadline_s=60)
     assert host == "1.2.3.4"
     assert port == 17445
@@ -50,15 +113,26 @@ def test_ssh_endpoint_treats_none_ports_as_not_ready(monkeypatch):
     fake_runpod = MagicMock()
     fake_runpod.get_pod.side_effect = [
         {"id": "p", "runtime": {"ports": None}},
-        {"id": "p", "runtime": {"ports": [
-            {"privatePort": 22, "isIpPublic": True, "ip": "1.2.3.4", "publicPort": 17445},
-        ]}},
+        {
+            "id": "p",
+            "runtime": {
+                "ports": [
+                    {
+                        "privatePort": 22,
+                        "isIpPublic": True,
+                        "ip": "1.2.3.4",
+                        "publicPort": 17445,
+                    },
+                ]
+            },
+        },
     ]
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
     monkeypatch.setattr("time.sleep", lambda *a: None)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     host, port = runner._ssh_endpoint("p", deadline_s=60)
     assert host == "1.2.3.4"
     assert port == 17445
@@ -72,8 +146,9 @@ def test_ssh_endpoint_raises_when_no_public_port(monkeypatch):
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
     monkeypatch.setattr("time.sleep", lambda *a: None)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     with pytest.raises(RuntimeError, match="never exposed a public SSH port"):
         runner._ssh_endpoint("p", deadline_s=1)
 
@@ -93,12 +168,15 @@ def test_ssh_exec_connects_with_host_and_port(monkeypatch):
     fake_stderr.channel.recv_ready.return_value = False
     fake_stderr.read.return_value = b""
     fake_paramiko.SSHClient.return_value.exec_command.return_value = (
-        MagicMock(), fake_stdout, fake_stderr
+        MagicMock(),
+        fake_stdout,
+        fake_stderr,
     )
     monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     runner.ssh_exec(("1.2.3.4", 17445), ["ketos", "train"])
 
     fake_client = fake_paramiko.SSHClient.return_value
@@ -123,16 +201,20 @@ def test_ssh_exec_raises_on_idle_timeout(monkeypatch):
     fake_stderr = MagicMock()
     fake_stderr.channel.recv_ready.return_value = False
     fake_paramiko.SSHClient.return_value.exec_command.return_value = (
-        MagicMock(), fake_stdout, fake_stderr
+        MagicMock(),
+        fake_stdout,
+        fake_stderr,
     )
     monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
     monkeypatch.setattr("time.sleep", lambda *a: None)  # don't actually wait 0.2s
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     with pytest.raises(RuntimeError, match="idle timeout"):
-        runner.ssh_exec(("1.2.3.4", 17445), ["pip", "install", "kraken"],
-                        idle_timeout=1)
+        runner.ssh_exec(
+            ("1.2.3.4", 17445), ["pip", "install", "kraken"], idle_timeout=1
+        )
     fake_paramiko.SSHClient.return_value.close.assert_called_once()
 
 
@@ -144,11 +226,13 @@ def test_download_artifact_does_not_terminate_pod_on_failure(monkeypatch):
     fake_paramiko.SSHClient.return_value.open_sftp.side_effect = Exception("scp fail")
     monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     with pytest.raises(Exception, match="scp fail"):
-        runner.download_artifact(("1.2.3.4", 17445), "/workspace/out.safetensors",
-                                  "/tmp/out.safetensors")
+        runner.download_artifact(
+            ("1.2.3.4", 17445), "/workspace/out.safetensors", "/tmp/out.safetensors"
+        )
     fake_runpod.terminate_pod.assert_not_called()
 
 
@@ -159,10 +243,12 @@ def test_upload_artifact_calls_sftp_put_with_local_and_remote(monkeypatch):
     fake_paramiko = MagicMock()
     monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
-    runner.upload_artifact("/tmp/train.arrow", ("1.2.3.4", 17445),
-                            "/workspace/train.arrow")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
+    runner.upload_artifact(
+        "/tmp/train.arrow", ("1.2.3.4", 17445), "/workspace/train.arrow"
+    )
 
     fake_paramiko.SSHClient.return_value.open_sftp.return_value.put.assert_called_once_with(
         "/tmp/train.arrow", "/workspace/train.arrow"
@@ -174,14 +260,18 @@ def test_upload_artifact_does_not_terminate_pod_on_failure(monkeypatch):
     fake_runpod = MagicMock()
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
     fake_paramiko = MagicMock()
-    fake_paramiko.SSHClient.return_value.open_sftp.return_value.put.side_effect = Exception("put fail")
+    fake_paramiko.SSHClient.return_value.open_sftp.return_value.put.side_effect = (
+        Exception("put fail")
+    )
     monkeypatch.setattr("msocr.training.runpod_runner.paramiko", fake_paramiko)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     with pytest.raises(Exception, match="put fail"):
-        runner.upload_artifact("/tmp/train.arrow", ("1.2.3.4", 17445),
-                                "/workspace/train.arrow")
+        runner.upload_artifact(
+            "/tmp/train.arrow", ("1.2.3.4", 17445), "/workspace/train.arrow"
+        )
     fake_runpod.terminate_pod.assert_not_called()
 
 
@@ -191,8 +281,9 @@ def test_run_training_full_lifecycle(monkeypatch):
     fake_runpod.create_pod.return_value = {"id": "pod-123"}
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     runner._ssh_endpoint = MagicMock(return_value=("1.2.3.4", 17445))
     runner.upload_artifact = MagicMock()
     runner.ssh_exec = MagicMock(return_value="ok")
@@ -211,11 +302,13 @@ def test_run_training_full_lifecycle(monkeypatch):
     runner.upload_artifact.assert_called_once_with(
         "/tmp/train.arrow", ("1.2.3.4", 17445), "/workspace/train.arrow"
     )
-    runner.ssh_exec.assert_has_calls([
-        call(("1.2.3.4", 17445), ["mkdir", "-p", "/workspace/models"]),
-        call(("1.2.3.4", 17445), ["pip", "install", "kraken"], timeout=600),
-        call(("1.2.3.4", 17445), ["ketos", "train"], timeout=7200),
-    ])
+    runner.ssh_exec.assert_has_calls(
+        [
+            call(("1.2.3.4", 17445), ["mkdir", "-p", "/workspace/models"]),
+            call(("1.2.3.4", 17445), ["pip", "install", "kraken"], timeout=3600),
+            call(("1.2.3.4", 17445), ["ketos", "train"], timeout=7200),
+        ]
+    )
     runner.download_artifact.assert_called_once_with(
         ("1.2.3.4", 17445), "/workspace/models/out.safetensors", "/tmp/out.safetensors"
     )
@@ -228,8 +321,9 @@ def test_run_training_leaves_pod_running_when_download_fails(monkeypatch):
     fake_runpod.create_pod.return_value = {"id": "pod-123"}
     monkeypatch.setattr("msocr.training.runpod_runner.runpod", fake_runpod)
 
-    runner = RunPodRunner(api_key="fake", image="img", gpu_type="RTX 4090",
-                          ssh_key_path="/tmp/id_ed25519")
+    runner = RunPodRunner(
+        api_key="fake", image="img", gpu_type="RTX 4090", ssh_key_path="/tmp/id_ed25519"
+    )
     runner._ssh_endpoint = MagicMock(return_value=("1.2.3.4", 17445))
     runner.ssh_exec = MagicMock(return_value="ok")
     runner.download_artifact = MagicMock(side_effect=Exception("download fail"))

@@ -3,6 +3,7 @@
 ponytail: CliRunner + --help assertions are the smallest thing that fails if
 the Click decorators, names, or options regress. No fixtures, no live calls.
 """
+
 from click.testing import CliRunner
 
 from msocr.cli import main
@@ -18,12 +19,64 @@ def _help_flags(cmd_name):
 def test_train_remote_help_lists_all_flags():
     out = _help_flags("train-remote")
     for flag in [
-        "--manifest", "--style-group", "--base-model", "--output-model",
-        "--reports-dir", "--pod-gpu", "--pod-image", "--ssh-key",
-        "--epochs", "--min-epochs", "--lag", "--freeze-backbone",
-        "--augment", "--device", "--workers",
+        "--manifest",
+        "--style-group",
+        "--base-model",
+        "--output-model",
+        "--reports-dir",
+        "--pod-gpu",
+        "--pod-image",
+        "--ssh-key",
+        "--epochs",
+        "--min-epochs",
+        "--lag",
+        "--freeze-backbone",
+        "--augment",
+        "--device",
+        "--workers",
     ]:
         assert flag in out, f"missing {flag!r} in train-remote help"
+
+
+def test_train_segmenter_remote_help_lists_backends_and_safety_flags():
+    out = _help_flags("train-segmenter-remote")
+    for value in [
+        "blla",
+        "orli",
+        "dfine",
+        "yolo-obb",
+        "--manifest",
+        "--base-model",
+        "--output-model",
+        "--line-height",
+        "--dry-run",
+    ]:
+        assert value in out, f"missing {value!r} in train-segmenter-remote help"
+
+
+def test_train_segmenter_remote_rejects_open_ssh_private_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake")
+    key = tmp_path / "id_ed25519"
+    key.write_text("not-a-real-key", encoding="utf-8")
+    key.chmod(0o644)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "train-segmenter-remote",
+            "--manifest",
+            str(tmp_path / "manifest.json"),
+            "--backend",
+            "blla",
+            "--output-model",
+            str(tmp_path / "model.safetensors"),
+            "--ssh-key",
+            str(key),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "permissions are too open" in result.output
 
 
 def test_evaluate_help_lists_all_flags():
@@ -40,14 +93,23 @@ def test_annotate_help_lists_all_flags():
 
 def test_extract_lines_help_lists_all_flags():
     out = _help_flags("extract-lines")
-    for flag in ["--expected-lines", "--output-dir", "--roi", "--row-centers", "--min-component-area"]:
+    for flag in [
+        "--expected-lines",
+        "--output-dir",
+        "--roi",
+        "--row-centers",
+        "--min-component-area",
+    ]:
         assert flag in out, f"missing {flag!r} in extract-lines help"
 
 
 def test_prepare_fragment_page_help_lists_safety_controls():
     out = _help_flags("prepare-fragment-page")
     for flag in [
-        "--output-dir", "--isolation-mode", "--propose-lines", "--segmentation-model",
+        "--output-dir",
+        "--isolation-mode",
+        "--propose-lines",
+        "--segmentation-model",
     ]:
         assert flag in out, f"missing {flag!r} in prepare-fragment-page help"
 
@@ -55,7 +117,10 @@ def test_prepare_fragment_page_help_lists_safety_controls():
 def test_evaluate_layout_help_lists_comparison_inputs():
     out = _help_flags("evaluate-layout")
     for flag in [
-        "--ground-truth", "--predictions", "--distance-tolerance", "--report",
+        "--ground-truth",
+        "--predictions",
+        "--distance-tolerance",
+        "--report",
     ]:
         assert flag in out, f"missing {flag!r} in evaluate-layout help"
 
@@ -70,13 +135,20 @@ def test_train_remote_requires_runpod_api_key(tmp_path, monkeypatch):
     """No RUNPOD_API_KEY -> ClickException before any pod call is made."""
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
     runner = CliRunner()
-    result = runner.invoke(main, [
-        "train-remote",
-        "--manifest", str(tmp_path / "m.json"),
-        "--style-group", "g1",
-        "--base-model", str(tmp_path / "base.safetensors"),
-        "--output-model", str(tmp_path / "out.safetensors"),
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "train-remote",
+            "--manifest",
+            str(tmp_path / "m.json"),
+            "--style-group",
+            "g1",
+            "--base-model",
+            str(tmp_path / "base.safetensors"),
+            "--output-model",
+            str(tmp_path / "out.safetensors"),
+        ],
+    )
     assert result.exit_code != 0
     assert "RUNPOD_API_KEY" in result.output
 
@@ -86,13 +158,20 @@ def test_train_remote_reports_missing_ssh_key_before_pod_call(tmp_path, monkeypa
     monkeypatch.setenv("RUNPOD_API_KEY", "fake")
     missing_key = tmp_path / "missing_id_ed25519"
     runner = CliRunner()
-    result = runner.invoke(main, [
-        "train-remote",
-        "--manifest", str(tmp_path / "m.json"),
-        "--style-group", "g1",
-        "--output-model", str(tmp_path / "out.safetensors"),
-        "--ssh-key", str(missing_key),
-    ])
+    result = runner.invoke(
+        main,
+        [
+            "train-remote",
+            "--manifest",
+            str(tmp_path / "m.json"),
+            "--style-group",
+            "g1",
+            "--output-model",
+            str(tmp_path / "out.safetensors"),
+            "--ssh-key",
+            str(missing_key),
+        ],
+    )
 
     assert result.exit_code != 0
     assert "SSH private key not found" in result.output
@@ -105,7 +184,13 @@ def test_main_help_lists_new_subcommands():
     assert result.exit_code == 0, result.output
     out = result.output
     for name in [
-        "train-remote", "evaluate", "annotate", "extract-lines",
-        "download-e27-images", "prepare-fragment-page", "evaluate-layout",
+        "train-remote",
+        "train-segmenter-remote",
+        "evaluate",
+        "annotate",
+        "extract-lines",
+        "download-e27-images",
+        "prepare-fragment-page",
+        "evaluate-layout",
     ]:
         assert name in out, f"missing {name!r} in top-level help"

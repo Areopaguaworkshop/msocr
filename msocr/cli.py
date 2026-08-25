@@ -21,8 +21,9 @@ from msocr.language_registry import (
 )
 from msocr.training.ketos_trainer import KetosTrainer
 
-
-LANG_CHOICES = click.Choice([*CLI_LANGUAGE_CODES, *CLI_LANGUAGE_ALIASES], case_sensitive=False)
+LANG_CHOICES = click.Choice(
+    [*CLI_LANGUAGE_CODES, *CLI_LANGUAGE_ALIASES], case_sensitive=False
+)
 OUTPUT_FORMAT_CHOICES = click.Choice(["json", "markdown"], case_sensitive=False)
 ENGINE_NAME = "kraken"
 DEFAULT_CONFIGS: Dict[str, str] = {
@@ -84,7 +85,9 @@ def _collect_xml_files_from_manifest(
                 f"Manifest case {case.id} does not define xml_path for partition {partition}."
             )
         if not case.xml_path.exists():
-            raise click.ClickException(f"Ground-truth XML file not found: {case.xml_path}")
+            raise click.ClickException(
+                f"Ground-truth XML file not found: {case.xml_path}"
+            )
         xml_files.append(case.xml_path)
 
     if not xml_files:
@@ -136,8 +139,12 @@ def main() -> None:
     default=None,
     help="Override the manifest's local destination",
 )
-@click.option("--verify-only", is_flag=True, help="Verify local files without downloading")
-@click.option("--force", is_flag=True, help="Redownload files even when a valid local copy exists")
+@click.option(
+    "--verify-only", is_flag=True, help="Verify local files without downloading"
+)
+@click.option(
+    "--force", is_flag=True, help="Redownload files even when a valid local copy exists"
+)
 def download_e27_images(manifest, output_dir, verify_only, force) -> None:
     """Download or verify the confirmed C2/E27 DTA image inventory."""
     from msocr.data.acquisition import acquire_source_images
@@ -218,7 +225,9 @@ def htr(input_path, lang, model, variant, output_format, output, device) -> None
                 }
             )
 
-    click.echo(f"engine={selected_engine} mode=htr lang={lang_key} pages={len(page_results)}")
+    click.echo(
+        f"engine={selected_engine} mode=htr lang={lang_key} pages={len(page_results)}"
+    )
 
     output_data = {
         "mode": "htr",
@@ -234,7 +243,9 @@ def htr(input_path, lang, model, variant, output_format, output, device) -> None
 
     for fmt in formats:
         output_path = _resolve_output_path(output, input_path, fmt)
-        output_path = save_output(output_data, image_paths, fmt, output_path, language=lang_key)
+        output_path = save_output(
+            output_data, image_paths, fmt, output_path, language=lang_key
+        )
         if output_path:
             click.echo(f"{fmt.upper()} result saved to {output_path}")
         elif fmt == "json":
@@ -245,7 +256,9 @@ def htr(input_path, lang, model, variant, output_format, output, device) -> None
 
 @main.command()
 @click.option("--lang", default="sogdian", show_default=True, type=LANG_CHOICES)
-@click.option("--config", "-c", help="Training config file; defaults to Sogdian HTR config")
+@click.option(
+    "--config", "-c", help="Training config file; defaults to Sogdian HTR config"
+)
 @click.option(
     "--gt-dir",
     type=click.Path(path_type=Path),
@@ -296,12 +309,16 @@ def train(lang, config, gt_dir, gt_file, split_manifest_id, split_partition) -> 
         f"xml_files={len(xml_files)} config={config_path}"
     )
     if manifest_label:
-        summary += f" split_manifest_id={manifest_label} partition={split_partition.lower()}"
+        summary += (
+            f" split_manifest_id={manifest_label} partition={split_partition.lower()}"
+        )
     click.echo(summary)
 
 
 @main.command()
-@click.option("--input-dir", "-i", required=True, help="Input directory with manuscript images")
+@click.option(
+    "--input-dir", "-i", required=True, help="Input directory with manuscript images"
+)
 def preprocess(input_dir) -> None:
     """Preprocess manuscript images for Kraken HTR."""
     from msocr.preprocessing.preprocessor import preprocess_directory
@@ -415,7 +432,9 @@ def evaluate_layout_command(
         manager = SessionManager(Path(temp_dir) / "sessions")
         reference = manager.parse_page_xml_to_v2(ground_truth.read_bytes())
     if reference is None:
-        raise click.ClickException("Ground-truth PAGE XML has no readable regions or lines")
+        raise click.ClickException(
+            "Ground-truth PAGE XML has no readable regions or lines"
+        )
     prediction = json.loads(predictions.read_text(encoding="utf-8"))
     result = evaluate_layout(
         reference, prediction, distance_tolerance=distance_tolerance
@@ -450,12 +469,30 @@ def _parse_row_centers(row_centers: str | None) -> list[int] | None:
 
 @main.command(name="extract-lines")
 @click.argument("image", type=click.Path(path_type=Path, exists=True))
-@click.option("--expected-lines", required=True, type=int, help="Exact manuscript line count to output")
-@click.option("--output-dir", required=True, type=click.Path(path_type=Path), help="Directory for crops and QA images")
+@click.option(
+    "--expected-lines",
+    required=True,
+    type=int,
+    help="Exact manuscript line count to output",
+)
+@click.option(
+    "--output-dir",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Directory for crops and QA images",
+)
 @click.option("--roi", help="Optional text region as LEFT,TOP,RIGHT,BOTTOM")
 @click.option("--row-centers", help="Optional comma-separated row center y-coordinates")
-@click.option("--min-component-area", default=20, show_default=True, type=int, help="Ignore smaller ink flecks")
-def extract_lines(image, expected_lines, output_dir, roi, row_centers, min_component_area) -> None:
+@click.option(
+    "--min-component-area",
+    default=20,
+    show_default=True,
+    type=int,
+    help="Ignore smaller ink flecks",
+)
+def extract_lines(
+    image, expected_lines, output_dir, roi, row_centers, min_component_area
+) -> None:
     """Extract exact-count fragmented manuscript row crops."""
     from msocr.segmentation.row_bands import extract_row_bands
 
@@ -474,19 +511,49 @@ def extract_lines(image, expected_lines, output_dir, roi, row_centers, min_compo
 
 @main.command(name="isolate-fragments")
 @click.argument("image_path", type=click.Path(path_type=Path, exists=True))
-@click.option("--output-dir", default="tmp/phase1_fragments/", show_default=True,
-              type=click.Path(path_type=Path), help="Directory for outputs")
-@click.option("--sauvola-window", default=51, show_default=True, type=int,
-              help="Sauvola local threshold window size (px)")
-@click.option("--min-component-area", default=50, show_default=True, type=int,
-              help="Drop ink components below this area")
-@click.option("--min-fragment-area", default=5000, show_default=True, type=int,
-              help="Flag fragments below this total ink area as FRAGMENT_TOO_SMALL")
-@click.option("--dbscan-eps", default=150, show_default=True, type=int,
-              help="DBSCAN cluster radius in px (typical inter-fragment gap)")
-def isolate_fragments_command(image_path, output_dir, sauvola_window,
-                              min_component_area, min_fragment_area,
-                              dbscan_eps) -> None:
+@click.option(
+    "--output-dir",
+    default="tmp/phase1_fragments/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory for outputs",
+)
+@click.option(
+    "--sauvola-window",
+    default=51,
+    show_default=True,
+    type=int,
+    help="Sauvola local threshold window size (px)",
+)
+@click.option(
+    "--min-component-area",
+    default=50,
+    show_default=True,
+    type=int,
+    help="Drop ink components below this area",
+)
+@click.option(
+    "--min-fragment-area",
+    default=5000,
+    show_default=True,
+    type=int,
+    help="Flag fragments below this total ink area as FRAGMENT_TOO_SMALL",
+)
+@click.option(
+    "--dbscan-eps",
+    default=150,
+    show_default=True,
+    type=int,
+    help="DBSCAN cluster radius in px (typical inter-fragment gap)",
+)
+def isolate_fragments_command(
+    image_path,
+    output_dir,
+    sauvola_window,
+    min_component_area,
+    min_fragment_area,
+    dbscan_eps,
+) -> None:
     """Phase 1: isolate manuscript fragments via Sauvola + CC + DBSCAN."""
     from msocr.segmentation.fragment_isolation import (
         fragments_to_json,
@@ -528,15 +595,29 @@ def isolate_fragments_command(image_path, output_dir, sauvola_window,
 
 @main.command(name="binarize-fragments")
 @click.argument("image_path", type=click.Path(path_type=Path, exists=True))
-@click.option("--fragments-json", required=True,
-              type=click.Path(path_type=Path, exists=True),
-              help="Path to fragments.json from Phase 1 (isolate-fragments)")
-@click.option("--output-dir", default="tmp/phase2_binarized/", show_default=True,
-              type=click.Path(path_type=Path), help="Directory for binarized masks")
-@click.option("--sauvola-window", default=25, show_default=True, type=int,
-              help="Sauvola local threshold window size (px)")
-def binarize_fragments_command(image_path, fragments_json, output_dir,
-                               sauvola_window) -> None:
+@click.option(
+    "--fragments-json",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Path to fragments.json from Phase 1 (isolate-fragments)",
+)
+@click.option(
+    "--output-dir",
+    default="tmp/phase2_binarized/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory for binarized masks",
+)
+@click.option(
+    "--sauvola-window",
+    default=25,
+    show_default=True,
+    type=int,
+    help="Sauvola local threshold window size (px)",
+)
+def binarize_fragments_command(
+    image_path, fragments_json, output_dir, sauvola_window
+) -> None:
     """Phase 2: binarize each non-flagged fragment for geometry use (deskew/CC)."""
     from msocr.preprocessing.binarize import (
         binarize_for_geometry,
@@ -599,15 +680,29 @@ def binarize_fragments_command(image_path, fragments_json, output_dir,
 
 @main.command(name="deskew-fragments")
 @click.argument("image_path", type=click.Path(path_type=Path, exists=True))
-@click.option("--fragments-json", required=True,
-              type=click.Path(path_type=Path, exists=True),
-              help="Path to fragments.json from Phase 1 (isolate-fragments)")
-@click.option("--binarized-dir", default="tmp/phase2_binarized/", show_default=True,
-              type=click.Path(path_type=Path),
-              help="Directory containing {fragment_id}_mask.png from Phase 2")
-@click.option("--output-dir", default="tmp/phase3_deskewed/", show_default=True,
-              type=click.Path(path_type=Path), help="Directory for deskewed crops")
-def deskew_fragments_command(image_path, fragments_json, binarized_dir, output_dir) -> None:
+@click.option(
+    "--fragments-json",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="Path to fragments.json from Phase 1 (isolate-fragments)",
+)
+@click.option(
+    "--binarized-dir",
+    default="tmp/phase2_binarized/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory containing {fragment_id}_mask.png from Phase 2",
+)
+@click.option(
+    "--output-dir",
+    default="tmp/phase3_deskewed/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory for deskewed crops",
+)
+def deskew_fragments_command(
+    image_path, fragments_json, binarized_dir, output_dir
+) -> None:
     """Phase 3: per-fragment Hough deskew using Phase 2 binary masks."""
     from msocr.preprocessing.deskew import deskew_fragment
     from msocr.segmentation.fragment_isolation import fragments_from_json
@@ -625,7 +720,9 @@ def deskew_fragments_command(image_path, fragments_json, binarized_dir, output_d
             continue
         mask_path = binarized_dir / f"{frag.fragment_id}_mask.png"
         if not mask_path.exists():
-            click.echo(f"ERROR {frag.fragment_id}: mask not found at {mask_path}", err=True)
+            click.echo(
+                f"ERROR {frag.fragment_id}: mask not found at {mask_path}", err=True
+            )
             continue
         mask = np.array(Image.open(mask_path).convert("L"))
         left, top, right, bottom = frag.bbox
@@ -681,14 +778,18 @@ def serve_annotation_api(host, port, base_dir, no_crop_manuscript_area) -> None:
             "Annotation UI not built. Run: cd frontend && npm install && npm run build"
         )
 
-    app = create_app(base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area)
+    app = create_app(
+        base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area
+    )
     uvicorn.run(app, host=host, port=port)
 
 
 @main.command(name="demo")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
 @click.option("--port", default="8001", show_default=True, type=int, help="Bind port")
-@click.option("--share", is_flag=True, default=False, help="No-op (Gradio share removed)")
+@click.option(
+    "--share", is_flag=True, default=False, help="No-op (Gradio share removed)"
+)
 def demo_react(host, port, share) -> None:
     """Run the annotation UI (annotation API + React SPA)."""
     import uvicorn
@@ -724,7 +825,9 @@ def demo_react(host, port, share) -> None:
     type=click.Path(path_type=Path, exists=True),
     help="Optional image path to run an end-to-end HTR smoke check",
 )
-@click.option("--model", type=click.Path(path_type=Path), help="Optional model override")
+@click.option(
+    "--model", type=click.Path(path_type=Path), help="Optional model override"
+)
 @click.option("--device", default="cpu", show_default=True, help="Inference device")
 @click.option(
     "--base-url",
@@ -744,7 +847,9 @@ def demo_react(host, port, share) -> None:
     type=int,
     help="Polling interval in seconds when waiting for a live runtime health check",
 )
-@click.option("--require-engine", help="Optional engine name that the smoke response must report")
+@click.option(
+    "--require-engine", help="Optional engine name that the smoke response must report"
+)
 def runtime_smoke_check_command(
     lang,
     variant,
@@ -757,7 +862,10 @@ def runtime_smoke_check_command(
     require_engine,
 ) -> None:
     """Validate HTR runtime model resolution, optionally with a live route smoke run."""
-    from msocr.service.deploy import runtime_htr_smoke_check, runtime_http_htr_smoke_check
+    from msocr.service.deploy import (
+        runtime_htr_smoke_check,
+        runtime_http_htr_smoke_check,
+    )
 
     try:
         if base_url:
@@ -779,7 +887,9 @@ def runtime_smoke_check_command(
                 device=device,
             )
         if require_engine:
-            observed_engine = payload.get("engine") or payload.get("htr", {}).get("engine")
+            observed_engine = payload.get("engine") or payload.get("htr", {}).get(
+                "engine"
+            )
             if observed_engine != require_engine.lower():
                 raise click.ClickException(
                     f"Expected runtime smoke engine {require_engine.lower()!r}, got {observed_engine!r}."
@@ -790,58 +900,163 @@ def runtime_smoke_check_command(
 
 
 @main.command(name="train-remote")
-@click.option("--manifest", required=True, type=click.Path(path_type=Path),
-              help="Path to the frozen split manifest JSON")
+@click.option(
+    "--manifest",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Path to the frozen split manifest JSON",
+)
 @click.option("--style-group", required=True, help="style_group_id to train")
-@click.option("--base-model", default=None, type=click.Path(path_type=Path),
-              help="Path to base .safetensors model. Omit to train from scratch.")
-@click.option("--output-model", required=True, type=click.Path(path_type=Path),
-              help="Path to write the fine-tuned .safetensors model")
-@click.option("--reports-dir", default="reports/", show_default=True,
-              type=click.Path(path_type=Path), help="Directory for evaluation reports")
-@click.option("--pod-gpu", default="NVIDIA GeForce RTX 3090", show_default=True,
-              help="RunPod GPU Cloud Pod GPU type id")
-@click.option("--pod-image", default="runpod/pytorch:1.0.2-cu1281-torch260-ubuntu2204",
-              show_default=True, help="RunPod pod Docker image (official PyTorch template)")
-@click.option("--ssh-key", default="~/.ssh/id_ed25519", show_default=True,
-              help="SSH private key path for the pod")
-@click.option("--epochs", default=2, show_default=True, type=int,
-              help="Max ketos training epochs (smoke test: 2)")
-@click.option("--min-epochs", default=0, show_default=True, type=int,
-              help="Minimum epochs before early stopping is allowed")
-@click.option("--lag", default=10, show_default=True, type=int,
-              help="Early-stop lag (epochs without val improvement)")
-@click.option("--freeze-backbone", default=0, show_default=True, type=int,
-              help="Number of backbone samples to freeze (fine-tune only)")
-@click.option("--augment/--no-augment", default=False, show_default=True,
-              help="Enable/disable ketos data augmentation")
-@click.option("--warmup", default=0, show_default=True, type=int,
-              help="ketos --warmup steps (0=off; 200 recommended for fine-tune stability)")
-@click.option("--lr", default=None, type=float,
-              help="ketos -r learning rate (None=ketos default 1e-3; 1e-4 recommended for small-data fine-tune)")
+@click.option(
+    "--base-model",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Path to base .safetensors model. Omit to train from scratch.",
+)
+@click.option(
+    "--output-model",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Path to write the fine-tuned .safetensors model",
+)
+@click.option(
+    "--reports-dir",
+    default="reports/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory for evaluation reports",
+)
+@click.option(
+    "--pod-gpu",
+    default="NVIDIA GeForce RTX 3090",
+    show_default=True,
+    help="RunPod GPU Cloud Pod GPU type id",
+)
+@click.option(
+    "--pod-image",
+    default="runpod/pytorch:1.0.2-cu1281-torch260-ubuntu2204",
+    show_default=True,
+    help="RunPod pod Docker image (official PyTorch template)",
+)
+@click.option(
+    "--ssh-key",
+    default="~/.ssh/id_ed25519",
+    show_default=True,
+    help="SSH private key path for the pod",
+)
+@click.option(
+    "--epochs",
+    default=2,
+    show_default=True,
+    type=int,
+    help="Max ketos training epochs (smoke test: 2)",
+)
+@click.option(
+    "--min-epochs",
+    default=0,
+    show_default=True,
+    type=int,
+    help="Minimum epochs before early stopping is allowed",
+)
+@click.option(
+    "--lag",
+    default=10,
+    show_default=True,
+    type=int,
+    help="Early-stop lag (epochs without val improvement)",
+)
+@click.option(
+    "--freeze-backbone",
+    default=0,
+    show_default=True,
+    type=int,
+    help="Number of backbone samples to freeze (fine-tune only)",
+)
+@click.option(
+    "--augment/--no-augment",
+    default=False,
+    show_default=True,
+    help="Enable/disable ketos data augmentation",
+)
+@click.option(
+    "--warmup",
+    default=0,
+    show_default=True,
+    type=int,
+    help="ketos --warmup steps (0=off; 200 recommended for fine-tune stability)",
+)
+@click.option(
+    "--lr",
+    default=None,
+    type=float,
+    help="ketos -r learning rate (None=ketos default 1e-3; 1e-4 recommended for small-data fine-tune)",
+)
 # ponytail: ketos 7.0.2 crashes on `-d cuda`/`-d cuda:0` with "list index out of range"
 # at the top-level group parser. `-d auto` lets pytorch pick the GPU correctly.
-@click.option("--device", default="auto", show_default=True,
-              help="Training device on the pod")
-@click.option("--workers", default=8, show_default=True, type=int,
-              help="Dataloader workers on the pod")
-@click.option("--quit", "quit_mode", default="fixed", show_default=True,
-              help="ketos --quit mode: fixed|early|dilate")
-@click.option("--setup-cmd", "setup_cmds", multiple=True, show_default=True,
-              help="Shell command to run on pod before training (repeatable). "
-                   "Default: pip-install kraken into the RunPod image.")
-@click.option("--freeze-old-rows/--no-freeze-old-rows", default=False, show_default=True,
-              help="§1 row-freeze: ship the Phase 0b Python-API harness to the pod and "
-                   "freeze the 37 old-class classifier rows, leaving the 5 new Sogdian "
-                   "rows trainable. Forces --freeze-backbone 999999. Requires the "
-                   "Phase 0a codec JSON at reports/c2av_union_codec.json.")
-@click.option("--codec-json", default="reports/c2av_union_codec.json", show_default=True,
-              type=click.Path(path_type=Path),
-              help="Path to the Phase 0a union codec JSON (row map). Used only with --freeze-old-rows.")
-def train_remote(manifest, style_group, base_model, output_model, reports_dir,
-                 pod_gpu, pod_image, ssh_key, epochs, min_epochs, lag,
-                 freeze_backbone, augment, warmup, lr, device, workers, quit_mode,
-                 setup_cmds, freeze_old_rows, codec_json) -> None:
+@click.option(
+    "--device", default="auto", show_default=True, help="Training device on the pod"
+)
+@click.option(
+    "--workers",
+    default=8,
+    show_default=True,
+    type=int,
+    help="Dataloader workers on the pod",
+)
+@click.option(
+    "--quit",
+    "quit_mode",
+    default="fixed",
+    show_default=True,
+    help="ketos --quit mode: fixed|early|dilate",
+)
+@click.option(
+    "--setup-cmd",
+    "setup_cmds",
+    multiple=True,
+    show_default=True,
+    help="Shell command to run on pod before training (repeatable). "
+    "Default: pip-install kraken into the RunPod image.",
+)
+@click.option(
+    "--freeze-old-rows/--no-freeze-old-rows",
+    default=False,
+    show_default=True,
+    help="§1 row-freeze: ship the Phase 0b Python-API harness to the pod and "
+    "freeze the 37 old-class classifier rows, leaving the 5 new Sogdian "
+    "rows trainable. Forces --freeze-backbone 999999. Requires the "
+    "Phase 0a codec JSON at reports/c2av_union_codec.json.",
+)
+@click.option(
+    "--codec-json",
+    default="reports/c2av_union_codec.json",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Path to the Phase 0a union codec JSON (row map). Used only with --freeze-old-rows.",
+)
+def train_remote(
+    manifest,
+    style_group,
+    base_model,
+    output_model,
+    reports_dir,
+    pod_gpu,
+    pod_image,
+    ssh_key,
+    epochs,
+    min_epochs,
+    lag,
+    freeze_backbone,
+    augment,
+    warmup,
+    lr,
+    device,
+    workers,
+    quit_mode,
+    setup_cmds,
+    freeze_old_rows,
+    codec_json,
+) -> None:
     """Train one style-group on a RunPod GPU Cloud Pod, then evaluate locally."""
     from msocr.training.orchestrator import walk_style_group
     from msocr.training.runpod_runner import RunPodRunner
@@ -900,14 +1115,168 @@ def train_remote(manifest, style_group, base_model, output_model, reports_dir,
     click.echo(f"Report: {Path(report.get('report_path', reports_dir))}")
 
 
+@main.command(name="train-segmenter-remote")
+@click.option(
+    "--manifest",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Frozen manifest with isolated train/validation manuscripts",
+)
+@click.option(
+    "--backend",
+    required=True,
+    type=click.Choice(["blla", "orli", "dfine", "yolo-obb"]),
+    help="Layout candidate trainer",
+)
+@click.option(
+    "--style-group",
+    default=None,
+    help="Optional style_group_id; omit to use each whole partition",
+)
+@click.option(
+    "--base-model",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Base weights. Required for Orli and YOLO-OBB; optional for BLLA/D-FINE",
+)
+@click.option(
+    "--output-model",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Local destination for the trained .safetensors or .pt model",
+)
+@click.option(
+    "--reports-dir",
+    default="reports/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Training provenance report directory",
+)
+@click.option("--epochs", default=50, show_default=True, type=click.IntRange(min=1))
+@click.option("--batch-size", default=8, show_default=True, type=click.IntRange(min=1))
+@click.option(
+    "--image-size", default=1280, show_default=True, type=click.IntRange(min=32)
+)
+@click.option("--workers", default=8, show_default=True, type=click.IntRange(min=0))
+@click.option(
+    "--line-height",
+    default=32.0,
+    show_default=True,
+    type=click.FloatRange(min=1.0),
+    help="Pixel height used only when PAGE TextLine Coords are absent",
+)
+@click.option("--augment/--no-augment", default=True, show_default=True)
+@click.option(
+    "--pod-gpu",
+    default="NVIDIA GeForce RTX 3090",
+    show_default=True,
+    help="RunPod GPU Cloud Pod GPU type id",
+)
+@click.option(
+    "--pod-image",
+    default="runpod/pytorch:1.0.2-cu1281-torch260-ubuntu2204",
+    show_default=True,
+    help="RunPod pod Docker image",
+)
+@click.option(
+    "--ssh-key",
+    default="~/.ssh/id_ed25519",
+    show_default=True,
+    help="SSH private key registered with RunPod",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Validate/convert data and write the command report without creating a pod",
+)
+def train_segmenter_remote_command(
+    manifest,
+    backend,
+    style_group,
+    base_model,
+    output_model,
+    reports_dir,
+    epochs,
+    batch_size,
+    image_size,
+    workers,
+    line_height,
+    augment,
+    pod_gpu,
+    pod_image,
+    ssh_key,
+    dry_run,
+) -> None:
+    """Train BLLA, Orli, D-FINE, or YOLO-OBB on one RunPod GPU Pod."""
+    from msocr.training.runpod_runner import RunPodRunner
+    from msocr.training.segmenter_trainer import train_segmenter_remote
+
+    runner = None
+    if not dry_run:
+        api_key = os.environ.get("RUNPOD_API_KEY")
+        if not api_key:
+            raise click.ClickException("RUNPOD_API_KEY environment variable is not set")
+        ssh_key_path = Path(os.path.expanduser(ssh_key))
+        if not ssh_key_path.is_file():
+            raise click.ClickException(f"SSH private key not found: {ssh_key_path}")
+        if ssh_key_path.stat().st_mode & 0o077:
+            raise click.ClickException(
+                f"SSH private key permissions are too open: {ssh_key_path}; run chmod 600"
+            )
+        runner = RunPodRunner(
+            api_key=api_key,
+            image=pod_image,
+            gpu_type=pod_gpu,
+            ssh_key_path=str(ssh_key_path),
+        )
+
+    try:
+        report = train_segmenter_remote(
+            runner=runner,
+            output_model_path=output_model,
+            reports_dir=reports_dir,
+            dry_run=dry_run,
+            manifest_path=manifest,
+            backend=backend,
+            style_group=style_group,
+            base_model_path=base_model,
+            epochs=epochs,
+            batch_size=batch_size,
+            image_size=image_size,
+            workers=workers,
+            line_height=line_height,
+            augment=augment,
+        )
+    except (OSError, RuntimeError, TimeoutError, KeyError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Segmenter training {report['status']}: {backend}")
+    if report["status"] == "completed":
+        click.echo(f"Model: {output_model}")
+    click.echo(f"Report: {report['report_path']}")
+
+
 @main.command(name="evaluate")
-@click.option("--manifest", required=True, type=click.Path(path_type=Path),
-              help="Path to the frozen split manifest JSON")
+@click.option(
+    "--manifest",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Path to the frozen split manifest JSON",
+)
 @click.option("--style-group", required=True, help="style_group_id to evaluate")
-@click.option("--model", required=True, type=click.Path(path_type=Path),
-              help="Path to the .safetensors or .mlmodel model to evaluate")
-@click.option("--reports-dir", default="reports/", show_default=True,
-              type=click.Path(path_type=Path), help="Directory for evaluation reports")
+@click.option(
+    "--model",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Path to the .safetensors or .mlmodel model to evaluate",
+)
+@click.option(
+    "--reports-dir",
+    default="reports/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory for evaluation reports",
+)
 def evaluate(manifest, style_group, model, reports_dir) -> None:
     """Run ketos test over a style-group's holdout partition and write a report."""
     from msocr.evaluation.harness import run_evaluation
@@ -922,32 +1291,61 @@ def evaluate(manifest, style_group, model, reports_dir) -> None:
     except (FileNotFoundError, KeyError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    report_files = sorted(Path(reports_dir).glob(f"{report['manifest_id']}__{style_group}__{Path(str(model)).stem}.*"))
+    report_files = sorted(
+        Path(reports_dir).glob(
+            f"{report['manifest_id']}__{style_group}__{Path(str(model)).stem}.*"
+        )
+    )
     report_path = report_files[0] if report_files else Path(reports_dir)
     click.echo(f"Evaluation report: {report_path}")
 
 
 @main.command(name="evaluate-segmenter")
-@click.option("--heldout-json", required=True,
-              type=click.Path(path_type=Path, exists=True),
-              help="JSON listing held-out plates: [{\"id\":..., \"image\":..., \"gt_xml\":...}]")
-@click.option("--backend", type=click.Choice(["blla", "kraken", "yolo-obb"]),
-              default="blla", show_default=True,
-              help="Segmenter backend: blla=stock Kraken (zero-shot floor), "
-                   "kraken=any Kraken-plugin seg model (orli/D-FINE/fine-tuned blla) "
-                   "via --model, yolo-obb=Ultralytics YOLO-OBB via --model")
-@click.option("--model", type=click.Path(path_type=Path),
-              help="Segmenter model path. Omit for stock blla. Required for yolo-obb.")
-@click.option("--recognizer", type=click.Path(path_type=Path),
-              help="Optional Kraken recognition .safetensors for end-to-end CER (metric 6)")
-@click.option("--distance-tolerance", default=15.0, show_default=True, type=float,
-              help="Baseline matching tolerance in pixels")
-@click.option("--reports-dir", default="reports/", show_default=True,
-              type=click.Path(path_type=Path), help="Directory for evaluation reports")
-@click.option("--label", default=None,
-              help="Report label (default: backend name or model stem)")
-def evaluate_segmenter_command(heldout_json, backend, model, recognizer,
-                               distance_tolerance, reports_dir, label) -> None:
+@click.option(
+    "--heldout-json",
+    required=True,
+    type=click.Path(path_type=Path, exists=True),
+    help='JSON listing held-out plates: [{"id":..., "image":..., "gt_xml":...}]',
+)
+@click.option(
+    "--backend",
+    type=click.Choice(["blla", "kraken", "yolo-obb"]),
+    default="blla",
+    show_default=True,
+    help="Segmenter backend: blla=stock Kraken (zero-shot floor), "
+    "kraken=any Kraken-plugin seg model (orli/D-FINE/fine-tuned blla) "
+    "via --model, yolo-obb=Ultralytics YOLO-OBB via --model",
+)
+@click.option(
+    "--model",
+    type=click.Path(path_type=Path),
+    help="Segmenter model path. Omit for stock blla. Required for yolo-obb.",
+)
+@click.option(
+    "--recognizer",
+    type=click.Path(path_type=Path),
+    help="Optional Kraken recognition .safetensors for end-to-end CER (metric 6)",
+)
+@click.option(
+    "--distance-tolerance",
+    default=15.0,
+    show_default=True,
+    type=float,
+    help="Baseline matching tolerance in pixels",
+)
+@click.option(
+    "--reports-dir",
+    default="reports/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory for evaluation reports",
+)
+@click.option(
+    "--label", default=None, help="Report label (default: backend name or model stem)"
+)
+def evaluate_segmenter_command(
+    heldout_json, backend, model, recognizer, distance_tolerance, reports_dir, label
+) -> None:
     """Evaluate a line-level segmenter on a frozen held-out fragment set (Phase 2).
 
     Produces reports/{label}__segmenter.json with layout metrics (precision,
@@ -959,7 +1357,9 @@ def evaluate_segmenter_command(heldout_json, backend, model, recognizer,
     docs/2026-08-10-fragment-segmentation-model-plan-v1.md Phase 2.
     """
     from msocr.evaluation.segmenter_harness import (
-        evaluate_segmenter, make_kraken_predict_fn, make_yolo_predict_fn,
+        evaluate_segmenter,
+        make_kraken_predict_fn,
+        make_yolo_predict_fn,
     )
 
     heldout = json.loads(heldout_json.read_text(encoding="utf-8"))
@@ -988,27 +1388,52 @@ def evaluate_segmenter_command(heldout_json, backend, model, recognizer,
 
     agg = report.get("aggregate", {})
     click.echo(f"Segmenter: {label}  plates={report['plates_evaluated']}")
-    click.echo(f"  baseline F1={agg.get('baseline_f1', '—')}  "
-               f"split={agg.get('split_count', '—')}  merge={agg.get('merge_count', '—')}")
+    click.echo(
+        f"  baseline F1={agg.get('baseline_f1', '—')}  "
+        f"split={agg.get('split_count', '—')}  merge={agg.get('merge_count', '—')}"
+    )
     if "end_to_end_cer" in agg:
         click.echo(f"  end-to-end CER={agg['end_to_end_cer']:.4f}")
     click.echo(f"  report: {Path(reports_dir) / f'{label}__segmenter.json'}")
 
 
 @main.command(name="dump-preds")
-@click.option("--model", required=True, type=click.Path(path_type=Path),
-              help="Path to the .safetensors or .mlmodel recognition model")
-@click.option("-x", "--xml", "xml_paths", multiple=True,
-              type=click.Path(path_type=Path, exists=True),
-              help="PAGE XML file to predict on (repeatable)")
-@click.option("-p", "--plate-id", "plate_ids", multiple=True,
-              help="Plate id to resolve (e.g. c2av12; repeatable)")
-@click.option("-o", "--output-dir", default="reports/", show_default=True,
-              type=click.Path(path_type=Path),
-              help="Directory to write <plate>_preds.json files")
-@click.option("--flag-damage", is_flag=True, default=False,
-              help="Add likely_damage + damage_reason to each record "
-                   "(Phase 0.5 damage-triage signal; see docs/DAMAGE_ANNOTATION_TASK.md)")
+@click.option(
+    "--model",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Path to the .safetensors or .mlmodel recognition model",
+)
+@click.option(
+    "-x",
+    "--xml",
+    "xml_paths",
+    multiple=True,
+    type=click.Path(path_type=Path, exists=True),
+    help="PAGE XML file to predict on (repeatable)",
+)
+@click.option(
+    "-p",
+    "--plate-id",
+    "plate_ids",
+    multiple=True,
+    help="Plate id to resolve (e.g. c2av12; repeatable)",
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    default="reports/",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Directory to write <plate>_preds.json files",
+)
+@click.option(
+    "--flag-damage",
+    is_flag=True,
+    default=False,
+    help="Add likely_damage + damage_reason to each record "
+    "(Phase 0.5 damage-triage signal; see docs/DAMAGE_ANNOTATION_TASK.md)",
+)
 def dump_preds_command(model, xml_paths, plate_ids, output_dir, flag_damage) -> None:
     """Run a Kraken recognition model over unannotated PAGE XMLs, dump predictions.
 
@@ -1040,9 +1465,13 @@ def dump_preds_command(model, xml_paths, plate_ids, output_dir, flag_damage) -> 
 @main.command(name="annotate")
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host")
 @click.option("--port", default="8001", show_default=True, type=int, help="Bind port")
-@click.option("--base-dir", default=".", show_default=True,
-              type=click.Path(path_type=Path),
-              help="Base directory for persisted annotation sessions")
+@click.option(
+    "--base-dir",
+    default=".",
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help="Base directory for persisted annotation sessions",
+)
 @click.option(
     "--no-crop-manuscript-area",
     is_flag=True,
@@ -1065,7 +1494,9 @@ def annotate(host, port, base_dir, no_crop_manuscript_area) -> None:
             "Annotation UI not built. Run: cd frontend && npm install && npm run build"
         )
 
-    app = create_app(base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area)
+    app = create_app(
+        base_dir=base_dir, crop_manuscript_area=not no_crop_manuscript_area
+    )
     sessions = sorted((base_dir / "sessions").glob("*/session.json"))
     suffix = f"/ui/{sessions[0].parent.name}" if sessions else "/ui/{session_id}"
     click.echo(f"Annotation UI: http://{host}:{port}{suffix}")
