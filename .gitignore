@@ -170,6 +170,7 @@ tmp/
 
 # Annotation session data (local working files)
 msocr/data/sessions/
+sessions/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
 
